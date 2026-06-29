@@ -1,2 +1,5 @@
 # ncompress
-Nitpick native compression library
+Nitpick native compression library.
+
+### Status
+Coming soon.
