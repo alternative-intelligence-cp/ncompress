@@ -1,0 +1,23 @@
+use "../src/bit_io.npk".*;
+use "../src/huffman.npk".*;
+use "../src/deflate.npk".*;
+use "../src/errors.npk".*;
+
+pub func:failsafe = int32(tbb32:err) { drop(err);
+    exit(1i32);
+};
+
+pub func:main = int32() {
+    HuffmanTree:tree = HuffmanTree{counts: 0i64, symbols: 0i64, max_len: 0i32};
+    drop(huffmantree_build_from_lengths(@tree, 0i64, 0i32));
+    
+    BitReader:reader = BitReader{data: 0i64, len: 0i64, byte_pos: 0i64, bit_pos: 0i32};
+    DeflateState:state = DeflateState{output_buffer: 0i64, output_pos: 0i64, output_cap: 0i64};
+    drop(deflate_process_dynamic(@reader, @state));
+    
+    drop(tree);
+    drop(reader);
+    drop(state);
+    
+    exit(0i32);
+};

@@ -28,6 +28,16 @@ pub func:deflate_process_fixed = int32(wild BitReader-> : reader, wild DeflateSt
     pass ERR_OK;
 };
 
+// Process a dynamic Huffman block (BTYPE 10)
+pub func:deflate_process_dynamic = int32(wild BitReader-> : reader, wild DeflateState-> : state) {
+    // Stub: Read HLIT, HDIST, HCLEN.
+    // Stub: Build code length tree.
+    // Stub: Decode literal and distance lengths using code length tree.
+    // Stub: Build dynamic literal and distance trees.
+    // Stub: Use dynamic trees to decode block data.
+    pass ERR_OK;
+};
+
 // Main DEFLATE block loop
 pub func:deflate_decompress = int32(wild BitReader-> : reader, wild DeflateState-> : state) {
     // Stub: read BFINAL and BTYPE, dispatch to correct block processor

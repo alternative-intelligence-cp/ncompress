@@ -30,3 +30,9 @@ pub func:huffmantree_init_fixed_distance = NIL(wild HuffmanTree-> : tree) {
     // Stub
     pass;
 };
+
+pub func:huffmantree_build_from_lengths = NIL(wild HuffmanTree-> : tree, int64:lengths_ptr, int32:num_lengths) {
+    // Stub: Compute bl_count and next_code
+    // Stub: Assign numerical codes to symbols based on length
+    pass;
+};
