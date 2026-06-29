@@ -1,0 +1,23 @@
+use "../src/bit_io.npk".*;
+use "../src/deflate.npk".*;
+use "../src/checksum.npk".*;
+use "../src/zlib.npk".*;
+use "../src/errors.npk".*;
+
+pub func:failsafe = int32(tbb32:err) { drop(err);
+    exit(1i32);
+};
+
+pub func:main = int32() {
+    BitReader:reader = BitReader{data: 0i64, len: 0i64, byte_pos: 0i64, bit_pos: 0i32};
+    DeflateState:state = DeflateState{output_buffer: 0i64, output_pos: 0i64, output_cap: 0i64};
+    Adler32:adler = Adler32{a: 1i32, b: 0i32};
+    
+    drop(zlib_decompress(@reader, @state, @adler));
+    
+    drop(reader);
+    drop(state);
+    drop(adler);
+    
+    exit(0i32);
+};

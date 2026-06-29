@@ -1,0 +1,22 @@
+// zlib.npk
+use "bit_io.npk".*;
+use "deflate.npk".*;
+use "checksum.npk".*;
+use "errors.npk".*;
+
+// High-level API for zlib decompression wrapper
+pub func:zlib_decompress = int32(wild BitReader-> : reader, wild DeflateState-> : state, wild Adler32-> : adler) {
+    // Stub: Read CMF and FLG bytes
+    // Stub: Verify FCHECK and CINFO (compression method 8 = DEFLATE)
+    // Stub: Check FDICT (unsupported for now, return ERR_DECOMPRESSION if set)
+    
+    // Stub: Run DEFLATE decompression loop
+    // drop(deflate_decompress(reader, state));
+    
+    // Stub: Update adler checksum on the generated output buffer bytes
+    // drop(adler32_update(adler, state->output_buffer, state->output_pos));
+    
+    // Stub: Read 4-byte Adler32 from bitstream and assert it matches our computed checksum
+    
+    pass ERR_OK;
+};
