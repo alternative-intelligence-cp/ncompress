@@ -1,0 +1,28 @@
+use "../src/bit_io.npk".*;
+use "../src/lzw.npk".*;
+use "../src/errors.npk".*;
+
+pub func:failsafe = int32(tbb32:err) { drop(err);
+    exit(1i32);
+};
+
+pub func:main = int32() {
+    BitReader:reader = BitReader{data: 0i64, len: 0i64, byte_pos: 0i64, bit_pos: 0i32};
+    LzwState:state = LzwState{
+        output_buffer: 0i64, 
+        output_pos: 0i64, 
+        output_cap: 0i64, 
+        min_code_size: 0i32, 
+        curr_code_size: 0i32, 
+        clear_code: 0i32, 
+        eoi_code: 0i32
+    };
+    
+    drop(lzwstate_init(@state, 0i64, 0i64, 2i32));
+    drop(lzw_decompress(@reader, @state));
+    
+    drop(reader);
+    drop(state);
+    
+    exit(0i32);
+};

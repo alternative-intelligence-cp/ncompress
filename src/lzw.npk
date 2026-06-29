@@ -1,0 +1,38 @@
+// lzw.npk
+use "bit_io.npk".*;
+use "errors.npk".*;
+
+pub struct:LzwState = {
+    int64:output_buffer;
+    int64:output_pos;
+    int64:output_cap;
+    int32:min_code_size;
+    int32:curr_code_size;
+    int32:clear_code;
+    int32:eoi_code;
+};
+
+pub func:lzwstate_init = NIL(wild LzwState-> : state, int64:out_ptr, int64:out_cap, int32:min_code_size) {
+    state->output_buffer = out_ptr;
+    state->output_pos = 0i64;
+    state->output_cap = out_cap;
+    state->min_code_size = min_code_size;
+    state->curr_code_size = min_code_size + 1i32;
+    state->clear_code = 0i32;
+    state->eoi_code = 0i32;
+    pass;
+};
+
+// Main LZW decompression loop tailored for GIF
+pub func:lzw_decompress = int32(wild BitReader-> : reader, wild LzwState-> : state) {
+    // Stub: Read first code (usually Clear Code)
+    // Stub: Initialize dictionary
+    
+    // Stub: Loop reading codes of `curr_code_size` bits
+    // Stub: Handle Clear Code (reset dictionary, reset curr_code_size)
+    // Stub: Handle EOI Code (break loop)
+    // Stub: Handle normal code (output sequence, add new sequence to dictionary)
+    // Stub: Increase curr_code_size when dictionary size reaches limit
+    
+    pass ERR_OK;
+};
