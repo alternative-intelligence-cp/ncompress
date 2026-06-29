@@ -1,0 +1,32 @@
+// huffman.npk
+use "bit_io.npk".*;
+
+pub struct:HuffmanTree = {
+    int64:counts; // Array of counts per bit length (up to 15 bits for DEFLATE)
+    int64:symbols; // Array of symbols sorted by length and value
+    int32:max_len;
+};
+
+pub func:huffmantree_init = NIL(wild HuffmanTree-> : tree, int64:counts_ptr, int64:symbols_ptr, int32:max_len) {
+    tree->counts = counts_ptr;
+    tree->symbols = symbols_ptr;
+    tree->max_len = max_len;
+    pass;
+};
+
+// Stub for decoding a single symbol from the bit stream
+pub func:huffmantree_decode_symbol = int32(wild HuffmanTree-> : tree, wild BitReader-> : reader) {
+    // Stub
+    pass 0i32;
+};
+
+// Initialize fixed length trees per RFC 1951
+pub func:huffmantree_init_fixed_literal = NIL(wild HuffmanTree-> : tree) {
+    // Stub
+    pass;
+};
+
+pub func:huffmantree_init_fixed_distance = NIL(wild HuffmanTree-> : tree) {
+    // Stub
+    pass;
+};

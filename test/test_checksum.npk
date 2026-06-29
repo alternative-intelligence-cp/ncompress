@@ -6,9 +6,11 @@ pub func:failsafe = int32(tbb32:err) { drop err;
 
 pub func:main = int32() {
     Adler32:adler = Adler32{a: 1i32, b: 0i32};
+    drop adler32_init(@adler);
     drop adler;
     
     CRC32:crc = CRC32{crc: 0i32};
+    drop crc32_init(@crc);
     drop crc;
     
     exit 0i32;

@@ -1,0 +1,35 @@
+// deflate.npk
+use "bit_io.npk".*;
+use "huffman.npk".*;
+use "errors.npk".*;
+
+pub struct:DeflateState = {
+    int64:output_buffer;
+    int64:output_pos;
+    int64:output_cap;
+};
+
+pub func:deflatestate_init = NIL(wild DeflateState-> : state, int64:out_ptr, int64:out_cap) {
+    state->output_buffer = out_ptr;
+    state->output_pos = 0i64;
+    state->output_cap = out_cap;
+    pass;
+};
+
+// Process an uncompressed block (BTYPE 00)
+pub func:deflate_process_uncompressed = int32(wild BitReader-> : reader, wild DeflateState-> : state) {
+    // Stub: skip to byte boundary, read LEN, NLEN, copy LEN bytes
+    pass ERR_OK;
+};
+
+// Process a fixed Huffman block (BTYPE 01)
+pub func:deflate_process_fixed = int32(wild BitReader-> : reader, wild DeflateState-> : state) {
+    // Stub: Use fixed literal and distance trees
+    pass ERR_OK;
+};
+
+// Main DEFLATE block loop
+pub func:deflate_decompress = int32(wild BitReader-> : reader, wild DeflateState-> : state) {
+    // Stub: read BFINAL and BTYPE, dispatch to correct block processor
+    pass ERR_OK;
+};

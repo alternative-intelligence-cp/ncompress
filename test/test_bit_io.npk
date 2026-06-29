@@ -6,9 +6,11 @@ pub func:failsafe = int32(tbb32:err) { drop err;
 
 pub func:main = int32() {
     BitReader:reader = BitReader{data: 0i64, len: 0i64, byte_pos: 0i64, bit_pos: 0i32};
+    drop bitreader_init(@reader, 0i64, 0i64);
     drop reader;
     
     BitWriter:writer = BitWriter{data: 0i64, capacity: 0i64, byte_pos: 0i64, bit_pos: 0i32};
+    drop bitwriter_init(@writer, 0i64, 0i64);
     drop writer;
     
     exit 0i32;
