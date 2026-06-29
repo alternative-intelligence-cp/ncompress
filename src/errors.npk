@@ -1,0 +1,11 @@
+// errors.npk
+
+pub fixed int32:ERR_OK = 0i32;
+pub fixed int32:ERR_DECOMPRESSION = 1i32;
+pub fixed int32:ERR_INVALID_CHECKSUM = 2i32;
+pub fixed int32:ERR_UNEXPECTED_EOF = 3i32;
+
+pub struct:DecompressionError = {
+    int32:code;
+    int64:message_ptr;
+};

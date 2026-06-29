@@ -1,0 +1,43 @@
+// checksum.npk
+
+// Adler32 Implementation Structs and Stubs
+pub struct:Adler32 = {
+    int32:a;
+    int32:b;
+};
+
+pub func:adler32_init = NIL(wild Adler32-> : ctx) {
+    ctx->a = 1i32;
+    ctx->b = 0i32;
+    pass;
+};
+
+pub func:adler32_update = NIL(wild Adler32-> : ctx, int64:data, int64:len) {
+    // Stub logic to be implemented later
+    pass;
+};
+
+pub func:adler32_finish = int32(wild Adler32-> : ctx) {
+    // Stub logic
+    pass 0i32;
+};
+
+// CRC32 Implementation Structs and Stubs
+pub struct:CRC32 = {
+    int32:crc;
+};
+
+pub func:crc32_init = NIL(wild CRC32-> : ctx) {
+    ctx->crc = 0i32; // Standard CRC initial value is usually ~0 (or 0xFFFFFFFF)
+    pass;
+};
+
+pub func:crc32_update = NIL(wild CRC32-> : ctx, int64:data, int64:len) {
+    // Stub logic to be implemented later
+    pass;
+};
+
+pub func:crc32_finish = int32(wild CRC32-> : ctx) {
+    // Stub logic
+    pass 0i32;
+};

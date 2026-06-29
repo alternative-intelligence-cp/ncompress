@@ -1,0 +1,15 @@
+use "../src/checksum.npk".*;
+
+pub func:failsafe = int32(tbb32:err) { drop err;
+    exit 1i32;
+};
+
+pub func:main = int32() {
+    Adler32:adler = Adler32{a: 1i32, b: 0i32};
+    drop adler;
+    
+    CRC32:crc = CRC32{crc: 0i32};
+    drop crc;
+    
+    exit 0i32;
+};

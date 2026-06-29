@@ -1,0 +1,52 @@
+// bit_io.npk
+
+pub struct:BitReader = {
+    int64:data;     // pointer to the buffer (raw memory address)
+    int64:len;      // length in bytes
+    int64:byte_pos; // current byte index
+    int32:bit_pos;  // current bit index inside the byte (0-7)
+};
+
+pub struct:BitWriter = {
+    int64:data;     // pointer to the buffer (raw memory address)
+    int64:capacity; // capacity in bytes
+    int64:byte_pos;
+    int32:bit_pos;
+};
+
+pub func:bitreader_init = NIL(wild BitReader-> : reader, int64:data_ptr, int64:len) {
+    reader->data = data_ptr;
+    reader->len = len;
+    reader->byte_pos = 0i64;
+    reader->bit_pos = 0i32;
+    pass;
+};
+
+pub func:bitwriter_init = NIL(wild BitWriter-> : writer, int64:data_ptr, int64:capacity) {
+    writer->data = data_ptr;
+    writer->capacity = capacity;
+    writer->byte_pos = 0i64;
+    writer->bit_pos = 0i32;
+    pass;
+};
+
+// Implement basic read/write stubs. Actual logic will use npk_mem_read_byte, etc.
+pub func:bitreader_read_bit = int32(wild BitReader-> : reader) {
+    // Stub
+    pass 0i32;
+};
+
+pub func:bitreader_read_bits = int32(wild BitReader-> : reader, int32:count) {
+    // Stub
+    pass 0i32;
+};
+
+pub func:bitwriter_write_bit = NIL(wild BitWriter-> : writer, int32:bit) {
+    // Stub
+    pass;
+};
+
+pub func:bitwriter_write_bits = NIL(wild BitWriter-> : writer, int32:val, int32:count) {
+    // Stub
+    pass;
+};
