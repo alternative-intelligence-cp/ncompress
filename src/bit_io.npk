@@ -41,6 +41,24 @@ pub func:bitreader_read_bits = int32(wild BitReader-> : reader, int32:count) {
     pass 0i32;
 };
 
+// Skip to the next byte boundary
+pub func:bitreader_skip_to_byte_boundary = NIL(wild BitReader-> : reader) {
+    // Stub: if bit_pos > 0, set bit_pos = 0, byte_pos++
+    pass;
+};
+
+// Read a 16-bit unsigned integer (assumes we are byte-aligned)
+pub func:bitreader_read_uint16 = int32(wild BitReader-> : reader) {
+    // Stub
+    pass 0i32;
+};
+
+// Read a 32-bit unsigned integer (assumes we are byte-aligned)
+pub func:bitreader_read_uint32 = int32(wild BitReader-> : reader) {
+    // Stub
+    pass 0i32;
+};
+
 pub func:bitwriter_write_bit = NIL(wild BitWriter-> : writer, int32:bit) {
     // Stub
     pass;
