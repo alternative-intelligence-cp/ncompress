@@ -1,7 +1,26 @@
-// deflate.npk
+// deflate.npk — DEFLATE decompression (RFC 1951)
+//
+// Supports all three block types:
+//   BTYPE=00: Uncompressed (stored) blocks
+//   BTYPE=01: Fixed Huffman codes
+//   BTYPE=10: Dynamic Huffman codes
+//
+// Security invariants:
+//   - Output buffer overflow checked before every byte write
+//   - Back-reference distance checked: pos - dist >= 0
+//   - Dynamic tree parameters bounded: HLIT ≤ 286, HDIST ≤ 30, HCLEN ≤ 19
+//   - Decode loop terminates: bounded by output_cap
+//   - All extra-bit reads bounds-checked
+
 use "bit_io.npk".*;
 use "huffman.npk".*;
 use "errors.npk".*;
+use "mem.npk".*;
+
+extern "nitpick_libc_mem" {
+    func:nitpick_libc_mem_calloc      = int64(int64:count, int64:size);
+    func:nitpick_libc_mem_free        = void(int64:ptr);
+}
 
 pub struct:DeflateState = {
     int64:output_buffer;
@@ -16,30 +35,451 @@ pub func:deflatestate_init = NIL(wild DeflateState-> : state, int64:out_ptr, int
     pass;
 };
 
-// Process an uncompressed block (BTYPE 00)
-pub func:deflate_process_uncompressed = int32(wild BitReader-> : reader, wild DeflateState-> : state) {
-    // Stub: skip to byte boundary, read LEN, NLEN, copy LEN bytes
+// Emit a single byte to the output buffer
+func:_deflate_emit = int32(wild DeflateState-> : state, int32:byte_val) {
+    if (state->output_pos >= state->output_cap) { pass ERR_DECOMPRESSION; }
+    drop raw store8(state->output_buffer + state->output_pos,
+                    @cast_unchecked<int8>(byte_val & 255i32));
+    state->output_pos = state->output_pos + 1i64;
     pass ERR_OK;
 };
 
-// Process a fixed Huffman block (BTYPE 01)
-pub func:deflate_process_fixed = int32(wild BitReader-> : reader, wild DeflateState-> : state) {
-    // Stub: Use fixed literal and distance trees
+// Copy `length` bytes from (output_pos - distance) to output_pos
+// This handles overlapping copies (e.g., run-length encoding where distance < length)
+func:_deflate_copy_back = int32(wild DeflateState-> : state, int32:length, int32:distance) {
+    int64:dist64 = @cast_unchecked<int64>(distance);
+    int64:len64  = @cast_unchecked<int64>(length);
+
+    if (state->output_pos - dist64 < 0i64) { pass ERR_DECOMPRESSION; }
+    if (state->output_pos + len64 > state->output_cap) { pass ERR_DECOMPRESSION; }
+
+    int64:src = state->output_pos - dist64;
+    int64:ci = 0i64;
+    while (ci < len64) {
+        int32:byte_val = @cast_unchecked<int32>(raw load8(state->output_buffer + src + ci)) & 255i32;
+        drop raw store8(state->output_buffer + state->output_pos + ci,
+                        @cast_unchecked<int8>(byte_val));
+        ci = ci + 1i64;
+    }
+    state->output_pos = state->output_pos + len64;
     pass ERR_OK;
 };
 
-// Process a dynamic Huffman block (BTYPE 10)
-pub func:deflate_process_dynamic = int32(wild BitReader-> : reader, wild DeflateState-> : state) {
-    // Stub: Read HLIT, HDIST, HCLEN.
-    // Stub: Build code length tree.
-    // Stub: Decode literal and distance lengths using code length tree.
-    // Stub: Build dynamic literal and distance trees.
-    // Stub: Use dynamic trees to decode block data.
+// RFC 1951 Table 3.2.5 — length extra bits
+// Length codes 257-285 map to actual lengths 3-258
+// Returns: (base_length, extra_bits) packed as base_length * 256 + extra_bits
+func:_deflate_length_info = int32(int32:code) {
+    // Codes 257-264: lengths 3-10, 0 extra bits
+    if (code <= 264i32) { pass (code - 257i32 + 3i32) * 256i32; }
+    // Codes 265-268: base 11,13,15,17, 1 extra bit
+    if (code <= 268i32) { pass (11i32 + (code - 265i32) * 2i32) * 256i32 + 1i32; }
+    // Codes 269-272: base 19,23,27,31, 2 extra bits
+    if (code <= 272i32) { pass (19i32 + (code - 269i32) * 4i32) * 256i32 + 2i32; }
+    // Codes 273-276: base 35,43,51,59, 3 extra bits
+    if (code <= 276i32) { pass (35i32 + (code - 273i32) * 8i32) * 256i32 + 3i32; }
+    // Codes 277-280: base 67,83,99,115, 4 extra bits
+    if (code <= 280i32) { pass (67i32 + (code - 277i32) * 16i32) * 256i32 + 4i32; }
+    // Codes 281-284: base 131,163,195,227, 5 extra bits
+    if (code <= 284i32) { pass (131i32 + (code - 281i32) * 32i32) * 256i32 + 5i32; }
+    // Code 285: length 258, 0 extra bits
+    if (code == 285i32) { pass 258i32 * 256i32; }
+    pass -1i32; // invalid
+};
+
+// RFC 1951 Table 3.2.5 — distance extra bits
+// Distance codes 0-29 map to distances 1-32768
+func:_deflate_distance_info = int32(int32:code) {
+    if (code <= 3i32) { pass (code + 1i32) * 256i32; } // 0 extra bits
+    // For codes 4+: extra_bits = (code-2)/2, base = (1 << ((code/2)+1)) + 1
+    int32:extra = (code - 2i32) / 2i32;
+    int32:base_dist = (1i32 << ((code / 2i32) + 1i32)) + 1i32;
+    // Adjust for odd codes: add half the range
+    int32:half_range = 1i32 << extra;
+    if ((code & 1i32) == 1i32) {
+        base_dist = base_dist + half_range;
+    }
+    pass base_dist * 256i32 + extra;
+};
+
+// Decode symbols using literal and distance Huffman trees.
+// Shared by both fixed and dynamic block processors.
+func:_deflate_decode_block = int32(wild BitReader-> : reader,
+                                    wild DeflateState-> : state,
+                                    wild HuffmanTree-> : lit_tree,
+                                    wild HuffmanTree-> : dist_tree) {
+    int32:done = 0i32;
+    while (done == 0i32) {
+        int32:sym = raw huffmantree_decode_symbol(lit_tree, reader);
+        if (sym < 0i32) { pass sym; } // propagate error
+
+        if (sym < 256i32) {
+            // Literal byte
+            int32:er = raw _deflate_emit(state, sym);
+            if (er != ERR_OK) { pass er; }
+        } else {
+            if (sym == 256i32) {
+                // End of block
+                done = 1i32;
+            } else {
+                // Length/distance pair (sym = 257..285)
+                int32:len_info = raw _deflate_length_info(sym);
+                if (len_info < 0i32) { pass ERR_DECOMPRESSION; }
+                int32:base_len   = len_info / 256i32;
+                int32:extra_bits = len_info & 255i32;
+                int32:extra_val  = 0i32;
+                if (extra_bits > 0i32) {
+                    extra_val = raw bitreader_read_bits(reader, extra_bits);
+                    if (extra_val < 0i32) { pass ERR_UNEXPECTED_EOF; }
+                }
+                int32:length = base_len + extra_val;
+
+                // Read distance code
+                int32:dist_sym = raw huffmantree_decode_symbol(dist_tree, reader);
+                if (dist_sym < 0i32) { pass dist_sym; }
+                int32:dist_info = raw _deflate_distance_info(dist_sym);
+                if (dist_info < 0i32) { pass ERR_DECOMPRESSION; }
+                int32:base_dist  = dist_info / 256i32;
+                int32:dist_extra = dist_info & 255i32;
+                int32:dist_extra_val = 0i32;
+                if (dist_extra > 0i32) {
+                    dist_extra_val = raw bitreader_read_bits(reader, dist_extra);
+                    if (dist_extra_val < 0i32) { pass ERR_UNEXPECTED_EOF; }
+                }
+                int32:distance = base_dist + dist_extra_val;
+
+                int32:cr = raw _deflate_copy_back(state, length, distance);
+                if (cr != ERR_OK) { pass cr; }
+            }
+        }
+    }
     pass ERR_OK;
 };
 
-// Main DEFLATE block loop
-pub func:deflate_decompress = int32(wild BitReader-> : reader, wild DeflateState-> : state) {
-    // Stub: read BFINAL and BTYPE, dispatch to correct block processor
+// BTYPE=00: Uncompressed (stored) block
+pub func:deflate_process_uncompressed = int32(wild BitReader-> : reader,
+                                               wild DeflateState-> : state) {
+    drop bitreader_skip_to_byte_boundary(reader);
+
+    int32:block_len = raw bitreader_read_uint16(reader);
+    if (block_len < 0i32) { pass ERR_UNEXPECTED_EOF; }
+
+    int32:nlen = raw bitreader_read_uint16(reader);
+    if (nlen < 0i32) { pass ERR_UNEXPECTED_EOF; }
+
+    // Verify one's complement: LEN ^ NLEN must equal 0xFFFF
+    if ((block_len ^ nlen) != 65535i32) { pass ERR_DECOMPRESSION; }
+
+    // Copy block_len bytes
+    int32:bi = 0i32;
+    while (bi < block_len) {
+        int32:byte_val = raw bitreader_read_byte(reader);
+        if (byte_val < 0i32) { pass ERR_UNEXPECTED_EOF; }
+        int32:er = raw _deflate_emit(state, byte_val);
+        if (er != ERR_OK) { pass er; }
+        bi = bi + 1i32;
+    }
+    pass ERR_OK;
+};
+
+// BTYPE=01: Fixed Huffman block
+pub func:deflate_process_fixed = int32(wild BitReader-> : reader,
+                                        wild DeflateState-> : state) {
+    // Allocate trees and temporary length arrays via C malloc (GC-invisible)
+    // Literal tree: 288 symbols. Need counts[16] + symbols[288] + lengths[288]
+    int64:lit_counts = nitpick_libc_mem_calloc(16i64, 4i64);        // 16 int32
+    int64:lit_syms   = nitpick_libc_mem_calloc(288i64, 4i64);       // 288 int32
+    int64:lit_lens   = nitpick_libc_mem_calloc(288i64, 4i64);       // temp lengths
+    // Distance tree: 32 symbols
+    int64:dist_counts = nitpick_libc_mem_calloc(16i64, 4i64);
+    int64:dist_syms   = nitpick_libc_mem_calloc(32i64, 4i64);
+    int64:dist_lens   = nitpick_libc_mem_calloc(32i64, 4i64);
+
+    HuffmanTree:lit_tree  = HuffmanTree{counts: 0i64, symbols: 0i64, max_len: 0i32, num_syms: 0i32};
+    HuffmanTree:dist_tree = HuffmanTree{counts: 0i64, symbols: 0i64, max_len: 0i32, num_syms: 0i32};
+
+    drop huffmantree_init(@lit_tree, lit_counts, lit_syms, HUFFMAN_MAX_BITS);
+    drop huffmantree_init(@dist_tree, dist_counts, dist_syms, HUFFMAN_MAX_BITS);
+
+    int32:r1 = raw huffmantree_init_fixed_literal(@lit_tree, lit_lens);
+    if (r1 != ERR_OK) {
+        nitpick_libc_mem_free(lit_counts); nitpick_libc_mem_free(lit_syms);
+        nitpick_libc_mem_free(lit_lens);  nitpick_libc_mem_free(dist_counts);
+        nitpick_libc_mem_free(dist_syms); nitpick_libc_mem_free(dist_lens);
+        pass r1;
+    }
+
+    int32:r2 = raw huffmantree_init_fixed_distance(@dist_tree, dist_lens);
+    if (r2 != ERR_OK) {
+        nitpick_libc_mem_free(lit_counts); nitpick_libc_mem_free(lit_syms);
+        nitpick_libc_mem_free(lit_lens);  nitpick_libc_mem_free(dist_counts);
+        nitpick_libc_mem_free(dist_syms); nitpick_libc_mem_free(dist_lens);
+        pass r2;
+    }
+
+    int32:result = raw _deflate_decode_block(reader, state, @lit_tree, @dist_tree);
+
+    nitpick_libc_mem_free(lit_counts); nitpick_libc_mem_free(lit_syms);
+    nitpick_libc_mem_free(lit_lens);  nitpick_libc_mem_free(dist_counts);
+    nitpick_libc_mem_free(dist_syms); nitpick_libc_mem_free(dist_lens);
+
+    pass result;
+};
+
+// BTYPE=10: Dynamic Huffman block
+pub func:deflate_process_dynamic = int32(wild BitReader-> : reader,
+                                          wild DeflateState-> : state) {
+    // Read header fields
+    int32:hlit  = raw bitreader_read_bits(reader, 5i32);
+    if (hlit < 0i32) { pass ERR_UNEXPECTED_EOF; }
+    hlit = hlit + 257i32;
+
+    int32:hdist = raw bitreader_read_bits(reader, 5i32);
+    if (hdist < 0i32) { pass ERR_UNEXPECTED_EOF; }
+    hdist = hdist + 1i32;
+
+    int32:hclen = raw bitreader_read_bits(reader, 4i32);
+    if (hclen < 0i32) { pass ERR_UNEXPECTED_EOF; }
+    hclen = hclen + 4i32;
+
+    // Validate bounds per RFC 1951
+    if (hlit > 286i32) { pass ERR_DECOMPRESSION; }
+    if (hdist > 30i32) { pass ERR_DECOMPRESSION; }
+    if (hclen > 19i32) { pass ERR_DECOMPRESSION; }
+
+    // Code length alphabet order (RFC 1951 §3.2.7)
+    // Permutation: 16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15
+
+    // Allocate workspace via C malloc
+    int64:cl_lens    = nitpick_libc_mem_calloc(19i64, 4i64);     // code length lengths
+    int64:cl_counts  = nitpick_libc_mem_calloc(16i64, 4i64);     // CL tree counts
+    int64:cl_syms    = nitpick_libc_mem_calloc(19i64, 4i64);     // CL tree symbols
+    int64:all_lens   = nitpick_libc_mem_calloc(320i64, 4i64);    // combined lit+dist lengths
+    int64:lit_counts = nitpick_libc_mem_calloc(16i64, 4i64);
+    int64:lit_syms   = nitpick_libc_mem_calloc(288i64, 4i64);
+    int64:dist_counts = nitpick_libc_mem_calloc(16i64, 4i64);
+    int64:dist_syms   = nitpick_libc_mem_calloc(32i64, 4i64);
+
+    // Read code length alphabet code lengths (3 bits each, in permuted order)
+    // Permutation stored inline since we can't have static arrays
+    int32:ci = 0i32;
+    while (ci < hclen) {
+        int32:bits = raw bitreader_read_bits(reader, 3i32);
+        if (bits < 0i32) {
+            // cleanup and return
+            nitpick_libc_mem_free(cl_lens); nitpick_libc_mem_free(cl_counts);
+            nitpick_libc_mem_free(cl_syms); nitpick_libc_mem_free(all_lens);
+            nitpick_libc_mem_free(lit_counts); nitpick_libc_mem_free(lit_syms);
+            nitpick_libc_mem_free(dist_counts); nitpick_libc_mem_free(dist_syms);
+            pass ERR_UNEXPECTED_EOF;
+        }
+        // Map ci to actual code length symbol using the permutation
+        int32:perm_idx = 0i32;
+        if (ci == 0i32)  { perm_idx = 16i32; }
+        if (ci == 1i32)  { perm_idx = 17i32; }
+        if (ci == 2i32)  { perm_idx = 18i32; }
+        if (ci == 3i32)  { perm_idx = 0i32; }
+        if (ci == 4i32)  { perm_idx = 8i32; }
+        if (ci == 5i32)  { perm_idx = 7i32; }
+        if (ci == 6i32)  { perm_idx = 9i32; }
+        if (ci == 7i32)  { perm_idx = 6i32; }
+        if (ci == 8i32)  { perm_idx = 10i32; }
+        if (ci == 9i32)  { perm_idx = 5i32; }
+        if (ci == 10i32) { perm_idx = 11i32; }
+        if (ci == 11i32) { perm_idx = 4i32; }
+        if (ci == 12i32) { perm_idx = 12i32; }
+        if (ci == 13i32) { perm_idx = 3i32; }
+        if (ci == 14i32) { perm_idx = 13i32; }
+        if (ci == 15i32) { perm_idx = 2i32; }
+        if (ci == 16i32) { perm_idx = 14i32; }
+        if (ci == 17i32) { perm_idx = 1i32; }
+        if (ci == 18i32) { perm_idx = 15i32; }
+
+        drop raw store32(cl_lens + @cast_unchecked<int64>(perm_idx * 4i32), bits);
+        ci = ci + 1i32;
+    }
+
+    // Build code length Huffman tree
+    HuffmanTree:cl_tree = HuffmanTree{counts: 0i64, symbols: 0i64, max_len: 0i32, num_syms: 0i32};
+    drop huffmantree_init(@cl_tree, cl_counts, cl_syms, 7i32);
+    int32:br = raw huffmantree_build_from_lengths(@cl_tree, cl_lens, 19i32);
+    if (br != ERR_OK) {
+        nitpick_libc_mem_free(cl_lens); nitpick_libc_mem_free(cl_counts);
+        nitpick_libc_mem_free(cl_syms); nitpick_libc_mem_free(all_lens);
+        nitpick_libc_mem_free(lit_counts); nitpick_libc_mem_free(lit_syms);
+        nitpick_libc_mem_free(dist_counts); nitpick_libc_mem_free(dist_syms);
+        pass br;
+    }
+
+    // Decode hlit + hdist code lengths using the CL tree
+    int32:total_lens = hlit + hdist;
+    int32:li = 0i32;
+    while (li < total_lens) {
+        int32:sym = raw huffmantree_decode_symbol(@cl_tree, reader);
+        if (sym < 0i32) {
+            nitpick_libc_mem_free(cl_lens); nitpick_libc_mem_free(cl_counts);
+            nitpick_libc_mem_free(cl_syms); nitpick_libc_mem_free(all_lens);
+            nitpick_libc_mem_free(lit_counts); nitpick_libc_mem_free(lit_syms);
+            nitpick_libc_mem_free(dist_counts); nitpick_libc_mem_free(dist_syms);
+            pass sym;
+        }
+
+        if (sym <= 15i32) {
+            // Literal code length
+            drop raw store32(all_lens + @cast_unchecked<int64>(li * 4i32), sym);
+            li = li + 1i32;
+        } else {
+            if (sym == 16i32) {
+                // Copy previous length 3-6 times
+                if (li == 0i32) {
+                    nitpick_libc_mem_free(cl_lens); nitpick_libc_mem_free(cl_counts);
+                    nitpick_libc_mem_free(cl_syms); nitpick_libc_mem_free(all_lens);
+                    nitpick_libc_mem_free(lit_counts); nitpick_libc_mem_free(lit_syms);
+                    nitpick_libc_mem_free(dist_counts); nitpick_libc_mem_free(dist_syms);
+                    pass ERR_DECOMPRESSION;
+                }
+                int32:rep_count = raw bitreader_read_bits(reader, 2i32);
+                if (rep_count < 0i32) {
+                    nitpick_libc_mem_free(cl_lens); nitpick_libc_mem_free(cl_counts);
+                    nitpick_libc_mem_free(cl_syms); nitpick_libc_mem_free(all_lens);
+                    nitpick_libc_mem_free(lit_counts); nitpick_libc_mem_free(lit_syms);
+                    nitpick_libc_mem_free(dist_counts); nitpick_libc_mem_free(dist_syms);
+                    pass ERR_UNEXPECTED_EOF;
+                }
+                rep_count = rep_count + 3i32;
+                int32:prev_len = raw load32(all_lens + @cast_unchecked<int64>((li - 1i32) * 4i32));
+                int32:ri = 0i32;
+                while (ri < rep_count) {
+                    if (li >= total_lens) {
+                        nitpick_libc_mem_free(cl_lens); nitpick_libc_mem_free(cl_counts);
+                        nitpick_libc_mem_free(cl_syms); nitpick_libc_mem_free(all_lens);
+                        nitpick_libc_mem_free(lit_counts); nitpick_libc_mem_free(lit_syms);
+                        nitpick_libc_mem_free(dist_counts); nitpick_libc_mem_free(dist_syms);
+                        pass ERR_DECOMPRESSION;
+                    }
+                    drop raw store32(all_lens + @cast_unchecked<int64>(li * 4i32), prev_len);
+                    li = li + 1i32;
+                    ri = ri + 1i32;
+                }
+            } else {
+                if (sym == 17i32) {
+                    // Repeat 0 length 3-10 times
+                    int32:rep17 = raw bitreader_read_bits(reader, 3i32);
+                    if (rep17 < 0i32) {
+                        nitpick_libc_mem_free(cl_lens); nitpick_libc_mem_free(cl_counts);
+                        nitpick_libc_mem_free(cl_syms); nitpick_libc_mem_free(all_lens);
+                        nitpick_libc_mem_free(lit_counts); nitpick_libc_mem_free(lit_syms);
+                        nitpick_libc_mem_free(dist_counts); nitpick_libc_mem_free(dist_syms);
+                        pass ERR_UNEXPECTED_EOF;
+                    }
+                    rep17 = rep17 + 3i32;
+                    int32:ri17 = 0i32;
+                    while (ri17 < rep17) {
+                        if (li >= total_lens) {
+                            nitpick_libc_mem_free(cl_lens); nitpick_libc_mem_free(cl_counts);
+                            nitpick_libc_mem_free(cl_syms); nitpick_libc_mem_free(all_lens);
+                            nitpick_libc_mem_free(lit_counts); nitpick_libc_mem_free(lit_syms);
+                            nitpick_libc_mem_free(dist_counts); nitpick_libc_mem_free(dist_syms);
+                            pass ERR_DECOMPRESSION;
+                        }
+                        drop raw store32(all_lens + @cast_unchecked<int64>(li * 4i32), 0i32);
+                        li = li + 1i32;
+                        ri17 = ri17 + 1i32;
+                    }
+                } else {
+                    // sym == 18: repeat 0 length 11-138 times
+                    int32:rep18 = raw bitreader_read_bits(reader, 7i32);
+                    if (rep18 < 0i32) {
+                        nitpick_libc_mem_free(cl_lens); nitpick_libc_mem_free(cl_counts);
+                        nitpick_libc_mem_free(cl_syms); nitpick_libc_mem_free(all_lens);
+                        nitpick_libc_mem_free(lit_counts); nitpick_libc_mem_free(lit_syms);
+                        nitpick_libc_mem_free(dist_counts); nitpick_libc_mem_free(dist_syms);
+                        pass ERR_UNEXPECTED_EOF;
+                    }
+                    rep18 = rep18 + 11i32;
+                    int32:ri18 = 0i32;
+                    while (ri18 < rep18) {
+                        if (li >= total_lens) {
+                            nitpick_libc_mem_free(cl_lens); nitpick_libc_mem_free(cl_counts);
+                            nitpick_libc_mem_free(cl_syms); nitpick_libc_mem_free(all_lens);
+                            nitpick_libc_mem_free(lit_counts); nitpick_libc_mem_free(lit_syms);
+                            nitpick_libc_mem_free(dist_counts); nitpick_libc_mem_free(dist_syms);
+                            pass ERR_DECOMPRESSION;
+                        }
+                        drop raw store32(all_lens + @cast_unchecked<int64>(li * 4i32), 0i32);
+                        li = li + 1i32;
+                        ri18 = ri18 + 1i32;
+                    }
+                }
+            }
+        }
+    }
+
+    // Build literal/length tree from first hlit lengths
+    HuffmanTree:lit_tree  = HuffmanTree{counts: 0i64, symbols: 0i64, max_len: 0i32, num_syms: 0i32};
+    drop huffmantree_init(@lit_tree, lit_counts, lit_syms, HUFFMAN_MAX_BITS);
+    int32:lr = raw huffmantree_build_from_lengths(@lit_tree, all_lens, hlit);
+    if (lr != ERR_OK) {
+        nitpick_libc_mem_free(cl_lens); nitpick_libc_mem_free(cl_counts);
+        nitpick_libc_mem_free(cl_syms); nitpick_libc_mem_free(all_lens);
+        nitpick_libc_mem_free(lit_counts); nitpick_libc_mem_free(lit_syms);
+        nitpick_libc_mem_free(dist_counts); nitpick_libc_mem_free(dist_syms);
+        pass lr;
+    }
+
+    // Build distance tree from next hdist lengths (starting at offset hlit)
+    HuffmanTree:dist_tree = HuffmanTree{counts: 0i64, symbols: 0i64, max_len: 0i32, num_syms: 0i32};
+    drop huffmantree_init(@dist_tree, dist_counts, dist_syms, HUFFMAN_MAX_BITS);
+    int64:dist_offset = @cast_unchecked<int64>(hlit * 4i32);
+    int32:dr = raw huffmantree_build_from_lengths(@dist_tree, all_lens + dist_offset, hdist);
+    if (dr != ERR_OK) {
+        nitpick_libc_mem_free(cl_lens); nitpick_libc_mem_free(cl_counts);
+        nitpick_libc_mem_free(cl_syms); nitpick_libc_mem_free(all_lens);
+        nitpick_libc_mem_free(lit_counts); nitpick_libc_mem_free(lit_syms);
+        nitpick_libc_mem_free(dist_counts); nitpick_libc_mem_free(dist_syms);
+        pass dr;
+    }
+
+    // Decode the block
+    int32:result = raw _deflate_decode_block(reader, state, @lit_tree, @dist_tree);
+
+    // Cleanup
+    nitpick_libc_mem_free(cl_lens); nitpick_libc_mem_free(cl_counts);
+    nitpick_libc_mem_free(cl_syms); nitpick_libc_mem_free(all_lens);
+    nitpick_libc_mem_free(lit_counts); nitpick_libc_mem_free(lit_syms);
+    nitpick_libc_mem_free(dist_counts); nitpick_libc_mem_free(dist_syms);
+
+    pass result;
+};
+
+// Main DEFLATE decompression: process blocks until BFINAL=1
+pub func:deflate_decompress = int32(wild BitReader-> : reader,
+                                     wild DeflateState-> : state) {
+    int32:last_block = 0i32;
+
+    while (last_block == 0i32) {
+        // Read BFINAL (1 bit)
+        int32:bfinal = raw bitreader_read_bits(reader, 1i32);
+        if (bfinal < 0i32) { pass ERR_UNEXPECTED_EOF; }
+        last_block = bfinal;
+
+        // Read BTYPE (2 bits)
+        int32:btype = raw bitreader_read_bits(reader, 2i32);
+        if (btype < 0i32) { pass ERR_UNEXPECTED_EOF; }
+
+        int32:block_result = ERR_DECOMPRESSION;
+        if (btype == 0i32) {
+            block_result = raw deflate_process_uncompressed(reader, state);
+        }
+        if (btype == 1i32) {
+            block_result = raw deflate_process_fixed(reader, state);
+        }
+        if (btype == 2i32) {
+            block_result = raw deflate_process_dynamic(reader, state);
+        }
+        // btype == 3 is reserved/invalid → ERR_DECOMPRESSION
+
+        if (block_result != ERR_OK) { pass block_result; }
+    }
+
     pass ERR_OK;
 };

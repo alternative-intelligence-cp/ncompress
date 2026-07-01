@@ -1,9 +1,14 @@
-// errors.npk
+// errors.npk — Error codes for ncompress
+//
+// All error codes are NEGATIVE to distinguish from valid return values
+// (which are always non-negative: bytes, symbols, code lengths, etc.)
+//
+// Convention: functions returning int32 use negative = error, non-negative = success/data.
 
-pub fixed int32:ERR_OK = 0i32;
-pub fixed int32:ERR_DECOMPRESSION = 1i32;
-pub fixed int32:ERR_INVALID_CHECKSUM = 2i32;
-pub fixed int32:ERR_UNEXPECTED_EOF = 3i32;
+pub fixed int32:ERR_OK               = 0i32;
+pub fixed int32:ERR_DECOMPRESSION    = -1i32;
+pub fixed int32:ERR_INVALID_CHECKSUM = -2i32;
+pub fixed int32:ERR_UNEXPECTED_EOF   = -3i32;
 
 pub struct:DecompressionError = {
     int32:code;

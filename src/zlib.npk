@@ -1,22 +1,64 @@
-// zlib.npk
+// zlib.npk — zlib decompression wrapper (RFC 1950)
+//
+// Handles the zlib header (CMF+FLG), runs DEFLATE decompression,
+// then verifies the Adler32 checksum.
+
 use "bit_io.npk".*;
 use "deflate.npk".*;
 use "checksum.npk".*;
 use "errors.npk".*;
+use "mem.npk".*;
 
-// High-level API for zlib decompression wrapper
-pub func:zlib_decompress = int32(wild BitReader-> : reader, wild DeflateState-> : state, wild Adler32-> : adler) {
-    // Stub: Read CMF and FLG bytes
-    // Stub: Verify FCHECK and CINFO (compression method 8 = DEFLATE)
-    // Stub: Check FDICT (unsupported for now, return ERR_DECOMPRESSION if set)
-    
-    // Stub: Run DEFLATE decompression loop
-    // drop(deflate_decompress(reader, state));
-    
-    // Stub: Update adler checksum on the generated output buffer bytes
-    // drop(adler32_update(adler, state->output_buffer, state->output_pos));
-    
-    // Stub: Read 4-byte Adler32 from bitstream and assert it matches our computed checksum
-    
+// Decompress a zlib-compressed stream.
+// reader: positioned at the start of the zlib data (CMF byte)
+// state:  initialized DeflateState with output buffer
+// adler:  initialized Adler32 context (will be used for checksum verification)
+pub func:zlib_decompress = int32(wild BitReader-> : reader,
+                                  wild DeflateState-> : state,
+                                  wild Adler32-> : adler) {
+    // Read CMF byte
+    int32:cmf = raw bitreader_read_byte(reader);
+    if (cmf < 0i32) { pass ERR_UNEXPECTED_EOF; }
+
+    // Read FLG byte
+    int32:flg = raw bitreader_read_byte(reader);
+    if (flg < 0i32) { pass ERR_UNEXPECTED_EOF; }
+
+    // Verify FCHECK: (CMF * 256 + FLG) % 31 must equal 0
+    int32:check = (cmf * 256i32 + flg) & 65535i32;
+    if ((check - (check / 31i32) * 31i32) != 0i32) { pass ERR_DECOMPRESSION; }
+
+    // Extract CM (compression method): lower 4 bits of CMF
+    int32:cm = cmf & 15i32;
+    if (cm != 8i32) { pass ERR_DECOMPRESSION; } // must be DEFLATE
+
+    // Check FDICT (bit 5 of FLG): preset dictionary not supported
+    if (((flg >> 5i32) & 1i32) == 1i32) { pass ERR_DECOMPRESSION; }
+
+    // Run DEFLATE decompression
+    int32:dr = raw deflate_decompress(reader, state);
+    if (dr != ERR_OK) { pass dr; }
+
+    // Compute Adler32 over the decompressed output
+    drop adler32_update(adler, state->output_buffer, state->output_pos);
+    int32:computed_adler = raw adler32_finish(adler);
+
+    // Read expected Adler32 from stream (4 bytes, big-endian)
+    // Skip to byte boundary first (DEFLATE may leave mid-byte)
+    drop bitreader_skip_to_byte_boundary(reader);
+
+    int32:a0 = raw bitreader_read_byte(reader);
+    if (a0 < 0i32) { pass ERR_UNEXPECTED_EOF; }
+    int32:a1 = raw bitreader_read_byte(reader);
+    if (a1 < 0i32) { pass ERR_UNEXPECTED_EOF; }
+    int32:a2 = raw bitreader_read_byte(reader);
+    if (a2 < 0i32) { pass ERR_UNEXPECTED_EOF; }
+    int32:a3 = raw bitreader_read_byte(reader);
+    if (a3 < 0i32) { pass ERR_UNEXPECTED_EOF; }
+
+    int32:expected_adler = (a0 << 24i32) | (a1 << 16i32) | (a2 << 8i32) | a3;
+
+    if (computed_adler != expected_adler) { pass ERR_INVALID_CHECKSUM; }
+
     pass ERR_OK;
 };

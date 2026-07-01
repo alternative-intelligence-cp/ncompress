@@ -1,38 +1,195 @@
-// huffman.npk
+// huffman.npk — Canonical Huffman tree decoder (RFC 1951 §3.2.2)
+//
+// Uses a counts+symbols table. For each bit length 1..max_len, stores:
+//   counts[len] = number of symbols with that code length
+//   symbols[]   = symbols sorted by (length, code value)
+//
+// Decoding reads bits one at a time, subtracting the count at each length
+// until the right symbol is found.
+//
+// All storage is via raw int64 addresses backed by nitpick_libc_mem externals.
+// No managed pointers are used for table access.
+
 use "bit_io.npk".*;
+use "errors.npk".*;
+use "mem.npk".*;
+
+// Maximum code length for DEFLATE (15 bits for lit/len, 15 for dist)
+pub fixed int32:HUFFMAN_MAX_BITS = 15i32;
+// Maximum number of symbols in a literal/length tree
+pub fixed int32:HUFFMAN_MAX_LIT  = 288i32;
+// Maximum number of distance symbols
+pub fixed int32:HUFFMAN_MAX_DIST = 32i32;
+// Code length alphabet size (for dynamic trees)
+pub fixed int32:HUFFMAN_MAX_CL   = 19i32;
 
 pub struct:HuffmanTree = {
-    int64:counts; // Array of counts per bit length (up to 15 bits for DEFLATE)
-    int64:symbols; // Array of symbols sorted by length and value
-    int32:max_len;
+    int64:counts;    // int32[HUFFMAN_MAX_BITS+1] — count of symbols per bit length
+    int64:symbols;   // int32[max_symbols]       — symbols sorted by (length, value)
+    int32:max_len;   // actual maximum code length in this tree (≤ HUFFMAN_MAX_BITS)
+    int32:num_syms;  // total number of symbols stored
 };
 
-pub func:huffmantree_init = NIL(wild HuffmanTree-> : tree, int64:counts_ptr, int64:symbols_ptr, int32:max_len) {
-    tree->counts = counts_ptr;
+// Initialize tree pointers. Caller must allocate:
+//   counts_ptr: (HUFFMAN_MAX_BITS+1) * 4 = 64 bytes  (int32 array)
+//   symbols_ptr: max_symbols * 4 bytes                (int32 array)
+pub func:huffmantree_init = NIL(wild HuffmanTree-> : tree,
+                                 int64:counts_ptr, int64:symbols_ptr,
+                                 int32:max_len) {
+    tree->counts  = counts_ptr;
     tree->symbols = symbols_ptr;
     tree->max_len = max_len;
+    tree->num_syms = 0i32;
     pass;
 };
 
-// Stub for decoding a single symbol from the bit stream
-pub func:huffmantree_decode_symbol = int32(wild HuffmanTree-> : tree, wild BitReader-> : reader) {
-    // Stub
-    pass 0i32;
+// Build a canonical Huffman tree from an array of code lengths.
+// lengths_ptr[i] = code length for symbol i (0 = unused symbol).
+// num_lengths = number of symbols.
+//
+// RFC 1951 §3.2.2 construction:
+//   1. Count symbols per bit length (bl_count[])
+//   2. Compute first code for each bit length (next_code[])
+//   3. Sort symbols by (length, code) into the symbols array
+pub func:huffmantree_build_from_lengths = int32(wild HuffmanTree-> : tree,
+                                                 int64:lengths_ptr,
+                                                 int32:num_lengths) {
+    int64:counts_ptr = tree->counts;
+
+    // Step 0: Zero the counts array [0..HUFFMAN_MAX_BITS]
+    int32:ci = 0i32;
+    while (ci <= HUFFMAN_MAX_BITS) {
+        drop raw store32(counts_ptr + @cast_unchecked<int64>(ci * 4i32), 0i32);
+        ci = ci + 1i32;
+    }
+
+    // Step 1: Count symbols per bit length
+    int32:max_len_found = 0i32;
+    int32:si = 0i32;
+    while (si < num_lengths) {
+        int32:len = raw load32(lengths_ptr + @cast_unchecked<int64>(si * 4i32));
+        if (len > 0i32) {
+            if (len > HUFFMAN_MAX_BITS) { pass ERR_DECOMPRESSION; }
+            int32:old_count = raw load32(counts_ptr + @cast_unchecked<int64>(len * 4i32));
+            drop raw store32(counts_ptr + @cast_unchecked<int64>(len * 4i32), old_count + 1i32);
+            if (len > max_len_found) { max_len_found = len; }
+        }
+        si = si + 1i32;
+    }
+    tree->max_len = max_len_found;
+
+    // Step 2: Compute offsets (cumulative counts) for sorting symbols
+    // offsets[len] = starting position in symbols[] for symbols of length `len`
+    // We reuse a stack-local area. Since HUFFMAN_MAX_BITS=15, we need 16 int32s = 64 bytes.
+    // We'll build offsets in a separate pass using counts.
+
+    // First compute total number of coded symbols
+    int32:total = 0i32;
+    int32:oi = 1i32;
+    while (oi <= max_len_found) {
+        total = total + raw load32(counts_ptr + @cast_unchecked<int64>(oi * 4i32));
+        oi = oi + 1i32;
+    }
+    tree->num_syms = total;
+
+    // We need a temporary offsets array. We'll compute it and store into the
+    // symbols array temporarily, then overwrite with actual symbols.
+    // Actually, we'll compute offsets incrementally.
+    // offsets[1] = 0
+    // offsets[len] = offsets[len-1] + counts[len-1]
+    // We'll store offsets as int32 values in the first 16 positions of symbols,
+    // but that only works if total > 16. Instead, let's just compute them
+    // directly when filling symbols.
+
+    // Step 3: Build sorted symbols array
+    // For each length 1..max_len_found, scan all symbols and insert those
+    // with matching length. This is O(max_len * num_lengths) but max_len ≤ 15.
+    int32:sym_pos = 0i32;
+    int32:fill_len = 1i32;
+    while (fill_len <= max_len_found) {
+        int32:fi = 0i32;
+        while (fi < num_lengths) {
+            int32:flen = raw load32(lengths_ptr + @cast_unchecked<int64>(fi * 4i32));
+            if (flen == fill_len) {
+                drop raw store32(tree->symbols + @cast_unchecked<int64>(sym_pos * 4i32), fi);
+                sym_pos = sym_pos + 1i32;
+            }
+            fi = fi + 1i32;
+        }
+        fill_len = fill_len + 1i32;
+    }
+
+    pass ERR_OK;
 };
 
-// Initialize fixed length trees per RFC 1951
-pub func:huffmantree_init_fixed_literal = NIL(wild HuffmanTree-> : tree) {
-    // Stub
-    pass;
+// Decode one symbol from the bit stream using this Huffman tree.
+// Returns the decoded symbol value, or ERR_DECOMPRESSION on invalid code.
+//
+// Algorithm: read bits one at a time; for each bit length, check if the
+// accumulated code falls within the range of codes for that length.
+pub func:huffmantree_decode_symbol = int32(wild HuffmanTree-> : tree,
+                                           wild BitReader-> : reader) {
+    int32:code = 0i32;
+    int32:first = 0i32;  // first code of current length
+    int32:index = 0i32;  // index into sorted symbols
+    int32:len = 1i32;
+
+    while (len <= tree->max_len) {
+        int32:bit = raw bitreader_read_bit(reader);
+        if (bit < 0i32) { pass ERR_UNEXPECTED_EOF; }
+
+        code = (code << 1i32) | bit;
+        int32:count = raw load32(tree->counts + @cast_unchecked<int64>(len * 4i32));
+        if ((code - first) < count) {
+            // Found! Symbol is at index + (code - first)
+            int32:sym_idx = index + (code - first);
+            pass raw load32(tree->symbols + @cast_unchecked<int64>(sym_idx * 4i32));
+        }
+        index = index + count;
+        first = (first + count) << 1i32;
+        len = len + 1i32;
+    }
+
+    pass ERR_DECOMPRESSION;
 };
 
-pub func:huffmantree_init_fixed_distance = NIL(wild HuffmanTree-> : tree) {
-    // Stub
-    pass;
+// Build the fixed literal/length tree (RFC 1951 §3.2.6)
+//   0-143:   8-bit codes
+//   144-255: 9-bit codes
+//   256-279: 7-bit codes
+//   280-287: 8-bit codes
+pub func:huffmantree_init_fixed_literal = int32(wild HuffmanTree-> : tree,
+                                                 int64:lengths_ptr) {
+    int32:i = 0i32;
+    while (i < 144i32) {
+        drop raw store32(lengths_ptr + @cast_unchecked<int64>(i * 4i32), 8i32);
+        i = i + 1i32;
+    }
+    while (i < 256i32) {
+        drop raw store32(lengths_ptr + @cast_unchecked<int64>(i * 4i32), 9i32);
+        i = i + 1i32;
+    }
+    while (i < 280i32) {
+        drop raw store32(lengths_ptr + @cast_unchecked<int64>(i * 4i32), 7i32);
+        i = i + 1i32;
+    }
+    while (i < 288i32) {
+        drop raw store32(lengths_ptr + @cast_unchecked<int64>(i * 4i32), 8i32);
+        i = i + 1i32;
+    }
+
+    pass raw huffmantree_build_from_lengths(tree, lengths_ptr, 288i32);
 };
 
-pub func:huffmantree_build_from_lengths = NIL(wild HuffmanTree-> : tree, int64:lengths_ptr, int32:num_lengths) {
-    // Stub: Compute bl_count and next_code
-    // Stub: Assign numerical codes to symbols based on length
-    pass;
+// Build the fixed distance tree (RFC 1951 §3.2.6)
+//   32 symbols, all 5-bit codes
+pub func:huffmantree_init_fixed_distance = int32(wild HuffmanTree-> : tree,
+                                                  int64:lengths_ptr) {
+    int32:i = 0i32;
+    while (i < 32i32) {
+        drop raw store32(lengths_ptr + @cast_unchecked<int64>(i * 4i32), 5i32);
+        i = i + 1i32;
+    }
+
+    pass raw huffmantree_build_from_lengths(tree, lengths_ptr, 32i32);
 };

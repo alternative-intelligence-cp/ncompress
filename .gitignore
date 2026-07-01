@@ -30,3 +30,4 @@ build-*/
 test/test_bit_io
 test/test_checksum
 test/test_lzw
+test/test_deflate
