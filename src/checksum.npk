@@ -1,9 +1,28 @@
 // checksum.npk
+// Adler32 (RFC 1950 §8.2) and CRC32 (IEEE 802.3) implementations.
+//
+// Adler32: modular checksum used in zlib (PNG IDAT).
+//   - Two running sums A and B, modulo 65521 (largest prime < 2^16).
+//   - NMAX=5552: max bytes per block before deferred modulo (avoids overflow).
+//
+// CRC32: IEEE 802.3 reflected polynomial 0xEDB88320.
+//   - Used in PNG chunks and gzip.
+//   - Table-driven: all 256 entries precomputed as signed int32 constants.
+//
+// Security invariants:
+//   - All data pointer accesses are bounded by the caller-supplied `len`.
 
-// Adler32 Implementation Structs and Stubs
+use "errors.npk".*;
+use "mem.npk".*;
+
+
+// ─────────────────────────────────────────────────────────────
+// Adler32
+// ─────────────────────────────────────────────────────────────
+
 pub struct:Adler32 = {
-    int32:a;
-    int32:b;
+    int32:a;  // running sum A (mod 65521), initialised to 1
+    int32:b;  // running sum B (mod 65521), initialised to 0
 };
 
 pub func:adler32_init = NIL(wild Adler32-> : ctx) {
@@ -12,32 +31,349 @@ pub func:adler32_init = NIL(wild Adler32-> : ctx) {
     pass;
 };
 
+// Update Adler32 with `len` bytes at raw address `data`.
 pub func:adler32_update = NIL(wild Adler32-> : ctx, int64:data, int64:len) {
-    // Stub logic to be implemented later
+    if (len <= 0i64) { pass; }
+
+    int32:a    = ctx->a;
+    int32:b    = ctx->b;
+    int64:i    = 0i64;
+    int64:rem  = len;
+
+    while (rem > 0i64) {
+        // Max block before modulo (NMAX = 5552, standard Adler32 optimisation)
+        int32:block = @cast_unchecked<int32>(rem);
+        if (block > 5552i32) { block = 5552i32; }
+
+        int32:j = 0i32;
+        while (j < block) {
+            int32:byte = @cast_unchecked<int32>(raw load8(data + i)) & 255i32;
+            a = a + byte;
+            b = b + a;
+            j = j + 1i32;
+            i = i + 1i64;
+        }
+
+        a = a % 65521i32;
+        b = b % 65521i32;
+        rem = rem - @cast_unchecked<int64>(block);
+    }
+
+    ctx->a = a;
+    ctx->b = b;
     pass;
 };
 
+// Produce final Adler32 value: (B << 16) | A
 pub func:adler32_finish = int32(wild Adler32-> : ctx) {
-    // Stub logic
-    pass 0i32;
+    pass (ctx->b << 16i32) | ctx->a;
 };
 
-// CRC32 Implementation Structs and Stubs
+// ─────────────────────────────────────────────────────────────
+// CRC32 — IEEE 802.3 reflected poly 0xEDB88320
+// All 256 table entries precomputed as signed int32 literals.
+// ─────────────────────────────────────────────────────────────
+
 pub struct:CRC32 = {
-    int32:crc;
+    int32:crc;  // running CRC, initialised to -1 (0xFFFFFFFF)
 };
 
 pub func:crc32_init = NIL(wild CRC32-> : ctx) {
-    ctx->crc = 0i32; // Standard CRC initial value is usually ~0 (or 0xFFFFFFFF)
+    ctx->crc = -1i32; // 0xFFFFFFFF as signed int32
     pass;
 };
 
+// CRC32 table lookup — all 256 entries (poly 0xEDB88320, reflected).
+func:_crc32_table_entry = int32(int32:idx) {
+    idx = idx & 255i32;
+    if (idx ==   0i32) { pass 0i32; }
+    if (idx ==   1i32) { pass 1996959894i32; }
+    if (idx ==   2i32) { pass -301047508i32; }
+    if (idx ==   3i32) { pass -1727442502i32; }
+    if (idx ==   4i32) { pass 124634137i32; }
+    if (idx ==   5i32) { pass 1886057615i32; }
+    if (idx ==   6i32) { pass -379345611i32; }
+    if (idx ==   7i32) { pass -1637575261i32; }
+    if (idx ==   8i32) { pass 249268274i32; }
+    if (idx ==   9i32) { pass 2044508324i32; }
+    if (idx ==  10i32) { pass -522852066i32; }
+    if (idx ==  11i32) { pass -1747789432i32; }
+    if (idx ==  12i32) { pass 162941995i32; }
+    if (idx ==  13i32) { pass 2125561021i32; }
+    if (idx ==  14i32) { pass -407360249i32; }
+    if (idx ==  15i32) { pass -723522948i32; }
+    if (idx ==  16i32) { pass 499010111i32; }
+    if (idx ==  17i32) { pass 1793195344i32; }
+    if (idx ==  18i32) { pass -214298800i32; }
+    if (idx ==  19i32) { pass -1854539498i32; }
+    if (idx ==  20i32) { pass 448709332i32; }
+    if (idx ==  21i32) { pass 1814767162i32; }
+    if (idx ==  22i32) { pass -196953938i32; }
+    if (idx ==  23i32) { pass -1867607870i32; }
+    if (idx ==  24i32) { pass 325883990i32; }
+    if (idx ==  25i32) { pass 1599144042i32; }
+    if (idx ==  26i32) { pass -43620484i32; }
+    if (idx ==  27i32) { pass -1960622242i32; }
+    if (idx ==  28i32) { pass 335033533i32; }
+    if (idx ==  29i32) { pass 1573425662i32; }
+    if (idx ==  30i32) { pass -65019600i32; }
+    if (idx ==  31i32) { pass -1936954766i32; }
+    if (idx ==  32i32) { pass 997073096i32; }
+    if (idx ==  33i32) { pass 1281953886i32; }
+    if (idx ==  34i32) { pass -714786868i32; }
+    if (idx ==  35i32) { pass -1570279054i32; }
+    if (idx ==  36i32) { pass 1943174523i32; }
+    if (idx ==  37i32) { pass -999000004i32; }
+    if (idx ==  38i32) { pass -301880634i32; }
+    if (idx ==  39i32) { pass -1556109344i32; }
+    if (idx ==  40i32) { pass 1787991619i32; }
+    if (idx ==  41i32) { pass -1065534628i32; }
+    if (idx ==  42i32) { pass -492958248i32; }
+    if (idx ==  43i32) { pass -1715818810i32; }
+    if (idx ==  44i32) { pass 1861313280i32; }
+    if (idx ==  45i32) { pass -986940680i32; }
+    if (idx ==  46i32) { pass -506601452i32; }
+    if (idx ==  47i32) { pass -1702175524i32; }
+    if (idx ==  48i32) { pass 248222568i32; }
+    if (idx ==  49i32) { pass 2065664616i32; }
+    if (idx ==  50i32) { pass -464200048i32; }
+    if (idx ==  51i32) { pass -1846399124i32; }
+    if (idx ==  52i32) { pass 114587648i32; }
+    if (idx ==  53i32) { pass 2083868964i32; }
+    if (idx ==  54i32) { pass -447051786i32; }
+    if (idx ==  55i32) { pass -1862225880i32; }
+    if (idx ==  56i32) { pass -90904730i32; }
+    if (idx ==  57i32) { pass 1792939232i32; }
+    if (idx ==  58i32) { pass -698001802i32; }
+    if (idx ==  59i32) { pass -1336041660i32; }
+    if (idx ==  60i32) { pass -50734716i32; }
+    if (idx ==  61i32) { pass 1824274064i32; }
+    if (idx ==  62i32) { pass -671731408i32; }
+    if (idx ==  63i32) { pass -1361892440i32; }
+    if (idx ==  64i32) { pass 1997922056i32; }
+    if (idx ==  65i32) { pass 30422416i32; }
+    if (idx ==  66i32) { pass -1611745776i32; }
+    if (idx ==  67i32) { pass -302158900i32; }
+    if (idx ==  68i32) { pass 1952566754i32; }
+    if (idx ==  69i32) { pass 111247432i32; }
+    if (idx ==  70i32) { pass -1545617004i32; }
+    if (idx ==  71i32) { pass -389015122i32; }
+    if (idx ==  72i32) { pass 2024379560i32; }
+    if (idx ==  73i32) { pass 253317336i32; }
+    if (idx ==  74i32) { pass -1703894088i32; }
+    if (idx ==  75i32) { pass -511844062i32; }
+    if (idx ==  76i32) { pass 2139967638i32; }
+    if (idx ==  77i32) { pass 141866500i32; }
+    if (idx ==  78i32) { pass -1689249040i32; }
+    if (idx ==  79i32) { pass -527490994i32; }
+    if (idx ==  80i32) { pass 1802195444i32; }
+    if (idx ==  81i32) { pass 452581768i32; }
+    if (idx ==  82i32) { pass -1932895424i32; }
+    if (idx ==  83i32) { pass -228458418i32; }
+    if (idx ==  84i32) { pass 1812370925i32; }
+    if (idx ==  85i32) { pass 453092731i32; }
+    if (idx ==  86i32) { pass -2113342271i32; }
+    if (idx ==  87i32) { pass -183516073i32; }
+    if (idx ==  88i32) { pass 1706088902i32; }
+    if (idx ==  89i32) { pass 314042704i32; }
+    if (idx ==  90i32) { pass -1950435094i32; }
+    if (idx ==  91i32) { pass -54949764i32; }
+    if (idx ==  92i32) { pass 1658658271i32; }
+    if (idx ==  93i32) { pass 366619977i32; }
+    if (idx ==  94i32) { pass -1932296973i32; }
+    if (idx ==  95i32) { pass -69972891i32; }
+    if (idx ==  96i32) { pass 1303535960i32; }
+    if (idx ==  97i32) { pass 984961486i32; }
+    if (idx ==  98i32) { pass -1547960204i32; }
+    if (idx ==  99i32) { pass -725929758i32; }
+    if (idx == 100i32) { pass 1256170817i32; }
+    if (idx == 101i32) { pass 1037604311i32; }
+    if (idx == 102i32) { pass -1529756563i32; }
+    if (idx == 103i32) { pass -740887301i32; }
+    if (idx == 104i32) { pass 1131014506i32; }
+    if (idx == 105i32) { pass 879679996i32; }
+    if (idx == 106i32) { pass -1385723834i32; }
+    if (idx == 107i32) { pass -631195440i32; }
+    if (idx == 108i32) { pass 1141124467i32; }
+    if (idx == 109i32) { pass 855842277i32; }
+    if (idx == 110i32) { pass -1442165665i32; }
+    if (idx == 111i32) { pass -586318647i32; }
+    if (idx == 112i32) { pass 1342533948i32; }
+    if (idx == 113i32) { pass 654459306i32; }
+    if (idx == 114i32) { pass -1106571248i32; }
+    if (idx == 115i32) { pass -921952122i32; }
+    if (idx == 116i32) { pass 1466479909i32; }
+    if (idx == 117i32) { pass 544179635i32; }
+    if (idx == 118i32) { pass -1184443383i32; }
+    if (idx == 119i32) { pass -832445281i32; }
+    if (idx == 120i32) { pass 1591671054i32; }
+    if (idx == 121i32) { pass 702138776i32; }
+    if (idx == 122i32) { pass -1328506846i32; }
+    if (idx == 123i32) { pass -942167884i32; }
+    if (idx == 124i32) { pass 1504918807i32; }
+    if (idx == 125i32) { pass 783551873i32; }
+    if (idx == 126i32) { pass -1212326853i32; }
+    if (idx == 127i32) { pass -1061524307i32; }
+    if (idx == 128i32) { pass -306674912i32; }
+    if (idx == 129i32) { pass -1698712650i32; }
+    if (idx == 130i32) { pass 62317068i32; }
+    if (idx == 131i32) { pass 1957810842i32; }
+    if (idx == 132i32) { pass -355121351i32; }
+    if (idx == 133i32) { pass -1647151185i32; }
+    if (idx == 134i32) { pass 81470997i32; }
+    if (idx == 135i32) { pass 1943803523i32; }
+    if (idx == 136i32) { pass -480048366i32; }
+    if (idx == 137i32) { pass -1805370492i32; }
+    if (idx == 138i32) { pass 225274430i32; }
+    if (idx == 139i32) { pass 2053790376i32; }
+    if (idx == 140i32) { pass -468791541i32; }
+    if (idx == 141i32) { pass -1828061283i32; }
+    if (idx == 142i32) { pass 167816743i32; }
+    if (idx == 143i32) { pass 2097651377i32; }
+    if (idx == 144i32) { pass -267414716i32; }
+    if (idx == 145i32) { pass -2029476910i32; }
+    if (idx == 146i32) { pass 503444072i32; }
+    if (idx == 147i32) { pass 1762050814i32; }
+    if (idx == 148i32) { pass -144550051i32; }
+    if (idx == 149i32) { pass -2140837941i32; }
+    if (idx == 150i32) { pass 426522225i32; }
+    if (idx == 151i32) { pass 1852507879i32; }
+    if (idx == 152i32) { pass -19653770i32; }
+    if (idx == 153i32) { pass -1982649376i32; }
+    if (idx == 154i32) { pass 282753626i32; }
+    if (idx == 155i32) { pass 1742555852i32; }
+    if (idx == 156i32) { pass -105259153i32; }
+    if (idx == 157i32) { pass -1900089351i32; }
+    if (idx == 158i32) { pass 397917763i32; }
+    if (idx == 159i32) { pass 1622183637i32; }
+    if (idx == 160i32) { pass -690576408i32; }
+    if (idx == 161i32) { pass -1580100738i32; }
+    if (idx == 162i32) { pass 953729732i32; }
+    if (idx == 163i32) { pass 1340076626i32; }
+    if (idx == 164i32) { pass -776247311i32; }
+    if (idx == 165i32) { pass -1497606297i32; }
+    if (idx == 166i32) { pass 1068828381i32; }
+    if (idx == 167i32) { pass 1219638859i32; }
+    if (idx == 168i32) { pass -670225446i32; }
+    if (idx == 169i32) { pass -1358292148i32; }
+    if (idx == 170i32) { pass 906185462i32; }
+    if (idx == 171i32) { pass 1090812512i32; }
+    if (idx == 172i32) { pass -547295293i32; }
+    if (idx == 173i32) { pass -1469587627i32; }
+    if (idx == 174i32) { pass 829329135i32; }
+    if (idx == 175i32) { pass 1181335161i32; }
+    if (idx == 176i32) { pass -882789492i32; }
+    if (idx == 177i32) { pass -1134132454i32; }
+    if (idx == 178i32) { pass 628085408i32; }
+    if (idx == 179i32) { pass 1382605366i32; }
+    if (idx == 180i32) { pass -871598187i32; }
+    if (idx == 181i32) { pass -1156888829i32; }
+    if (idx == 182i32) { pass 570562233i32; }
+    if (idx == 183i32) { pass 1426400815i32; }
+    if (idx == 184i32) { pass -977650754i32; }
+    if (idx == 185i32) { pass -1296233688i32; }
+    if (idx == 186i32) { pass 733239954i32; }
+    if (idx == 187i32) { pass 1555261956i32; }
+    if (idx == 188i32) { pass -1026031705i32; }
+    if (idx == 189i32) { pass -1244606671i32; }
+    if (idx == 190i32) { pass 752459403i32; }
+    if (idx == 191i32) { pass 1541320221i32; }
+    if (idx == 192i32) { pass -1687895376i32; }
+    if (idx == 193i32) { pass -328994266i32; }
+    if (idx == 194i32) { pass 1969922972i32; }
+    if (idx == 195i32) { pass 40735498i32; }
+    if (idx == 196i32) { pass -1677130071i32; }
+    if (idx == 197i32) { pass -351390145i32; }
+    if (idx == 198i32) { pass 1913087877i32; }
+    if (idx == 199i32) { pass 83908371i32; }
+    if (idx == 200i32) { pass -1782625662i32; }
+    if (idx == 201i32) { pass -491226604i32; }
+    if (idx == 202i32) { pass 2075208622i32; }
+    if (idx == 203i32) { pass 213261112i32; }
+    if (idx == 204i32) { pass -1831694693i32; }
+    if (idx == 205i32) { pass -438977011i32; }
+    if (idx == 206i32) { pass 2094854071i32; }
+    if (idx == 207i32) { pass 198958881i32; }
+    if (idx == 208i32) { pass -2032938284i32; }
+    if (idx == 209i32) { pass -237706686i32; }
+    if (idx == 210i32) { pass 1759359992i32; }
+    if (idx == 211i32) { pass 534414190i32; }
+    if (idx == 212i32) { pass -2118248755i32; }
+    if (idx == 213i32) { pass -155638181i32; }
+    if (idx == 214i32) { pass 1873836001i32; }
+    if (idx == 215i32) { pass 414664567i32; }
+    if (idx == 216i32) { pass -2012718362i32; }
+    if (idx == 217i32) { pass -15766928i32; }
+    if (idx == 218i32) { pass 1711684554i32; }
+    if (idx == 219i32) { pass 285281116i32; }
+    if (idx == 220i32) { pass -1889165569i32; }
+    if (idx == 221i32) { pass -127750551i32; }
+    if (idx == 222i32) { pass 1634467795i32; }
+    if (idx == 223i32) { pass 376229701i32; }
+    if (idx == 224i32) { pass -1609899400i32; }
+    if (idx == 225i32) { pass -686959890i32; }
+    if (idx == 226i32) { pass 1308918612i32; }
+    if (idx == 227i32) { pass 956543938i32; }
+    if (idx == 228i32) { pass -1486412191i32; }
+    if (idx == 229i32) { pass -799009033i32; }
+    if (idx == 230i32) { pass 1231636301i32; }
+    if (idx == 231i32) { pass 1047427035i32; }
+    if (idx == 232i32) { pass -1362007478i32; }
+    if (idx == 233i32) { pass -640263460i32; }
+    if (idx == 234i32) { pass 1088359270i32; }
+    if (idx == 235i32) { pass 936918000i32; }
+    if (idx == 236i32) { pass -1447252397i32; }
+    if (idx == 237i32) { pass -558129467i32; }
+    if (idx == 238i32) { pass 1202900863i32; }
+    if (idx == 239i32) { pass 817233897i32; }
+    if (idx == 240i32) { pass -1111625188i32; }
+    if (idx == 241i32) { pass -893730166i32; }
+    if (idx == 242i32) { pass 1404277552i32; }
+    if (idx == 243i32) { pass 615818150i32; }
+    if (idx == 244i32) { pass -1160759803i32; }
+    if (idx == 245i32) { pass -841546093i32; }
+    if (idx == 246i32) { pass 1423857449i32; }
+    if (idx == 247i32) { pass 601450431i32; }
+    if (idx == 248i32) { pass -1285129682i32; }
+    if (idx == 249i32) { pass -1000256840i32; }
+    if (idx == 250i32) { pass 1567103746i32; }
+    if (idx == 251i32) { pass 711928724i32; }
+    if (idx == 252i32) { pass -1274298825i32; }
+    if (idx == 253i32) { pass -1022587231i32; }
+    if (idx == 254i32) { pass 1510334235i32; }
+    if (idx == 255i32) { pass 755167117i32; }
+    pass 0i32; // unreachable (idx & 255 covers all cases)
+};
+
+// Update CRC32 with `len` bytes at raw address `data`.
+// Direct per-bit computation: reflected poly 0xEDB88320 = -306674912i32.
+// The odd-branch arithmetic right shift sign-extends, but the poly XOR corrects it.
+// The even-branch masks the sign bit with 0x7FFFFFFF (= 2147483647).
 pub func:crc32_update = NIL(wild CRC32-> : ctx, int64:data, int64:len) {
-    // Stub logic to be implemented later
+    if (len <= 0i64) { pass; }
+    int32:crc = ctx->crc;
+    int64:i   = 0i64;
+    while (i < len) {
+        int32:byte = @cast_unchecked<int32>(raw load8(data + i)) & 255i32;
+        crc = crc ^ byte;
+        int32:b = 0i32;
+        while (b < 8i32) {
+            if ((crc & 1i32) == 1i32) {
+                // Logical right shift (clear sign bit) then XOR with poly
+                crc = ((crc >> 1i32) & 2147483647i32) ^ -306674912i32;
+            } else {
+                // Logical right shift only
+                crc = (crc >> 1i32) & 2147483647i32;
+            }
+            b = b + 1i32;
+        }
+        i = i + 1i64;
+    }
+    ctx->crc = crc;
     pass;
 };
 
+// Produce final CRC32 value (XOR with 0xFFFFFFFF = -1 as signed int32).
 pub func:crc32_finish = int32(wild CRC32-> : ctx) {
-    // Stub logic
-    pass 0i32;
+    pass ctx->crc ^ -1i32;
 };

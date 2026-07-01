@@ -1,0 +1,44 @@
+// mem.npk — raw memory helpers for ncompress
+// Uses int64 loads for byte access to avoid managed int8-> pointer lifecycle issues.
+
+pub func:store64 = int8(int64:addr, int64:val) {
+    int64->:ptr = @cast_unchecked<int64->>(addr);
+    ptr[0i64] = val;
+    pass 0i8;
+};
+
+pub func:load64 = int64(int64:addr) {
+    int64->:ptr = @cast_unchecked<int64->>(addr);
+    pass ptr[0i64];
+};
+
+pub func:store32 = int8(int64:addr, int32:val) {
+    int32->:ptr = @cast_unchecked<int32->>(addr);
+    ptr[0i64] = val;
+    pass 0i8;
+};
+
+pub func:load32 = int32(int64:addr) {
+    int32->:ptr = @cast_unchecked<int32->>(addr);
+    pass ptr[0i64];
+};
+
+pub func:store8 = int8(int64:addr, int8:val) {
+    int8->:ptr = @cast_unchecked<int8->>(addr);
+    ptr[0i64] = val;
+    pass 0i8;
+};
+
+// load8: reads one byte from `addr` using an aligned int64 load + shift.
+// Avoids creating a long-lived managed int8-> pointer.
+pub func:load8 = int8(int64:addr) {
+    // Align down to 8-byte boundary
+    int64:aligned = addr & -8i64; // -8 in two's complement masks off low 3 bits
+    int64->:ptr   = @cast_unchecked<int64->>(aligned);
+    int64:word    = ptr[0i64];
+    // Byte offset within the 64-bit word (little-endian: byte 0 is LSB)
+    int64:offset  = (addr & 7i64) * 8i64; // shift amount: 0, 8, 16, 24, 32, 40, 48, 56
+    int32:shift   = @cast_unchecked<int32>(offset);
+    int32:byte    = @cast_unchecked<int32>(word >> @cast_unchecked<int64>(shift)) & 255i32;
+    pass @cast_unchecked<int8>(byte);
+};

@@ -1,17 +1,143 @@
+// test/test_checksum.npk
+// Tests for Adler32 and CRC32 against known reference values.
+// All expected values verified against Python's zlib module.
 use "../src/checksum.npk".*;
+use "../src/errors.npk".*;
+use "../src/mem.npk".*;
 
-pub func:failsafe = int32(tbb32:err) { drop err;
-    exit 1i32;
-};
+pub func:failsafe = int32(tbb32:err) { drop(err); exit(1i32); };
 
 pub func:main = int32() {
+    int32:status = 0i32;
+
+    // =========================================================
+    // TEST 1: Adler32 — "Mark Adler"
+    // zlib.adler32(b"Mark Adler") = 0x13070394 = 319226772
+    // =========================================================
+    wild int8->:s1 = nodrop alloc(16i64);
+    int64:a1 = @cast_unchecked<int64>(s1);
+    drop raw store8(a1 + 0i64,  77i8);
+    drop raw store8(a1 + 1i64,  97i8);
+    drop raw store8(a1 + 2i64, 114i8);
+    drop raw store8(a1 + 3i64, 107i8);
+    drop raw store8(a1 + 4i64,  32i8);
+    drop raw store8(a1 + 5i64,  65i8);
+    drop raw store8(a1 + 6i64, 100i8);
+    drop raw store8(a1 + 7i64, 108i8);
+    drop raw store8(a1 + 8i64, 101i8);
+    drop raw store8(a1 + 9i64, 114i8);
+
     Adler32:adler = Adler32{a: 1i32, b: 0i32};
     drop adler32_init(@adler);
-    drop adler;
-    
-    CRC32:crc = CRC32{crc: 0i32};
-    drop crc32_init(@crc);
-    drop crc;
-    
-    exit 0i32;
+    drop adler32_update(@adler, a1, 10i64);
+    int32:adler_result = raw adler32_finish(@adler);
+    if (adler_result != 319226772i32) { status = 1i32; }
+
+    // =========================================================
+    // TEST 2: Adler32 — empty input returns 1
+    // =========================================================
+    Adler32:adler2 = Adler32{a: 1i32, b: 0i32};
+    drop adler32_init(@adler2);
+    drop adler32_update(@adler2, a1, 0i64);
+    int32:adler2_result = raw adler32_finish(@adler2);
+    if (adler2_result != 1i32) { status = 2i32; }
+
+    // =========================================================
+    // TEST 3: Adler32 — single byte 0x01
+    // zlib.adler32(b"\x01") = 131074 = 0x00020002
+    // =========================================================
+    wild int8->:s3 = nodrop alloc(8i64);
+    int64:a3 = @cast_unchecked<int64>(s3);
+    drop raw store8(a3, 1i8);
+
+    Adler32:adler3 = Adler32{a: 1i32, b: 0i32};
+    drop adler32_init(@adler3);
+    drop adler32_update(@adler3, a3, 1i64);
+    int32:adler3_result = raw adler32_finish(@adler3);
+    if (adler3_result != 131074i32) { status = 3i32; }
+
+    // =========================================================
+    // TEST 4: Adler32 — "abc" component verification
+    // a=295, b=589; result = 38600999 = 0x024D0127
+    // =========================================================
+    wild int8->:s4 = nodrop alloc(8i64);
+    int64:a4 = @cast_unchecked<int64>(s4);
+    drop raw store8(a4 + 0i64, 97i8);
+    drop raw store8(a4 + 1i64, 98i8);
+    drop raw store8(a4 + 2i64, 99i8);
+
+    Adler32:adler4 = Adler32{a: 1i32, b: 0i32};
+    drop adler32_init(@adler4);
+    drop adler32_update(@adler4, a4, 3i64);
+    if (adler4.a != 295i32) { status = 4i32; }
+    if (adler4.b != 589i32) { status = 5i32; }
+    int32:adler4_result = raw adler32_finish(@adler4);
+    if (adler4_result != 38600999i32) { status = 6i32; }
+
+    // =========================================================
+    // TEST 5: Adler32 — incremental update == single-pass
+    // =========================================================
+    Adler32:adler5a = Adler32{a: 1i32, b: 0i32};
+    drop adler32_init(@adler5a);
+    drop adler32_update(@adler5a, a1, 10i64);
+    int32:res5a = raw adler32_finish(@adler5a);
+
+    Adler32:adler5b = Adler32{a: 1i32, b: 0i32};
+    drop adler32_init(@adler5b);
+    drop adler32_update(@adler5b, a1, 5i64);
+    drop adler32_update(@adler5b, a1 + 5i64, 5i64);
+    int32:res5b = raw adler32_finish(@adler5b);
+
+    if (res5a != res5b) { status = 7i32; }
+
+    // =========================================================
+    // TEST 6: CRC32 — "123456789" canonical test vector
+    // zlib.crc32(b"123456789") = 0xCBF43926 = -873187034 signed
+    // =========================================================
+    wild int8->:s6 = nodrop alloc(16i64);
+    int64:a6 = @cast_unchecked<int64>(s6);
+    drop raw store8(a6 + 0i64, 49i8);
+    drop raw store8(a6 + 1i64, 50i8);
+    drop raw store8(a6 + 2i64, 51i8);
+    drop raw store8(a6 + 3i64, 52i8);
+    drop raw store8(a6 + 4i64, 53i8);
+    drop raw store8(a6 + 5i64, 54i8);
+    drop raw store8(a6 + 6i64, 55i8);
+    drop raw store8(a6 + 7i64, 56i8);
+    drop raw store8(a6 + 8i64, 57i8);
+
+    CRC32:crc_ctx = CRC32{crc: 0i32};
+    drop crc32_init(@crc_ctx);
+    drop crc32_update(@crc_ctx, a6, 9i64);
+    int32:crc_result = raw crc32_finish(@crc_ctx);
+    if (crc_result != -873187034i32) { status = 10i32; }
+
+    // =========================================================
+    // TEST 7: CRC32 — empty input returns 0
+    // =========================================================
+    CRC32:crc2 = CRC32{crc: 0i32};
+    drop crc32_init(@crc2);
+    drop crc32_update(@crc2, a6, 0i64);
+    int32:crc2_result = raw crc32_finish(@crc2);
+    if (crc2_result != 0i32) { status = 11i32; }
+
+    // =========================================================
+    // TEST 8: CRC32 — incremental update == single-pass
+    // =========================================================
+    CRC32:crc3 = CRC32{crc: 0i32};
+    drop crc32_init(@crc3);
+    drop crc32_update(@crc3, a6, 5i64);
+    drop crc32_update(@crc3, a6 + 5i64, 4i64);
+    int32:crc3_result = raw crc32_finish(@crc3);
+    if (crc3_result != -873187034i32) { status = 12i32; }
+
+    // =========================================================
+    // Cleanup
+    // =========================================================
+    dalloc(s1);
+    dalloc(s3);
+    dalloc(s4);
+    dalloc(s6);
+
+    exit status;
 };

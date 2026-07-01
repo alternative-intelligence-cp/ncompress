@@ -1,4 +1,23 @@
 // bit_io.npk
+// Bit-level I/O primitives for DEFLATE/LZW decompression.
+//
+// DEFLATE (RFC 1951) uses LSB-first bit ordering:
+//   - Bits are packed starting from the least-significant bit of each byte.
+//   - Example: byte 0xB2 (10110010) holds bits b0=0, b1=1, b2=0, b3=0,
+//     b4=1, b5=1, b6=0, b7=1 (LSB first).
+//
+// LZW (GIF) also uses LSB-first ordering.
+//
+// Security invariants:
+//   - Every byte read is bounds-checked against reader->len.
+//   - bit_pos is always in [0, 7]; byte_pos is always in [0, len].
+//   - read_bits count is clamped to [0, 25] — DEFLATE max is 15-bit codes
+//     plus 13-bit extra, but we're conservative with 25 bits.
+//   - write_bits count is clamped to [0, 25].
+//   - All out-of-bounds reads return ERR_UNEXPECTED_EOF (-3).
+//   - All writes beyond capacity return ERR_DECOMPRESSION (-1).
+
+use "errors.npk".*;
 
 pub struct:BitReader = {
     int64:data;     // pointer to the buffer (raw memory address)
@@ -15,56 +34,185 @@ pub struct:BitWriter = {
 };
 
 pub func:bitreader_init = NIL(wild BitReader-> : reader, int64:data_ptr, int64:len) {
-    reader->data = data_ptr;
-    reader->len = len;
+    reader->data     = data_ptr;
+    reader->len      = len;
     reader->byte_pos = 0i64;
-    reader->bit_pos = 0i32;
+    reader->bit_pos  = 0i32;
     pass;
 };
 
 pub func:bitwriter_init = NIL(wild BitWriter-> : writer, int64:data_ptr, int64:capacity) {
-    writer->data = data_ptr;
+    writer->data     = data_ptr;
     writer->capacity = capacity;
     writer->byte_pos = 0i64;
-    writer->bit_pos = 0i32;
+    writer->bit_pos  = 0i32;
     pass;
 };
 
-// Implement basic read/write stubs. Actual logic will use npk_mem_read_byte, etc.
+// Read a single bit (LSB-first). Returns 0 or 1 on success, ERR_UNEXPECTED_EOF on underflow.
 pub func:bitreader_read_bit = int32(wild BitReader-> : reader) {
-    // Stub
-    pass 0i32;
+    if (reader->byte_pos >= reader->len) {
+        pass ERR_UNEXPECTED_EOF;
+    }
+
+    // Load current byte
+    int8->:buf     = @cast_unchecked<int8->>(reader->data);
+    int32:byte_val = @cast_unchecked<int32>(buf[reader->byte_pos]) & 255i32;
+
+    // Extract bit at bit_pos (LSB-first)
+    int32:bit = (byte_val >> reader->bit_pos) & 1i32;
+
+    reader->bit_pos = reader->bit_pos + 1i32;
+    if (reader->bit_pos == 8i32) {
+        reader->bit_pos  = 0i32;
+        reader->byte_pos = reader->byte_pos + 1i64;
+    }
+
+    pass bit;
 };
 
+// Read `count` bits (LSB-first, bits 0..count-1).
+// Returns the assembled value on success, ERR_UNEXPECTED_EOF on underflow.
+// count must be in [0, 25]. Returns 0 immediately if count == 0.
 pub func:bitreader_read_bits = int32(wild BitReader-> : reader, int32:count) {
-    // Stub
-    pass 0i32;
+    if (count <= 0i32) { pass 0i32; }
+    if (count > 25i32) { count = 25i32; }
+
+    int32:result = 0i32;
+    int32:shift  = 0i32;
+
+    while (shift < count) {
+        int32:bit = bitreader_read_bit(reader);
+        if (bit == ERR_UNEXPECTED_EOF) {
+            pass ERR_UNEXPECTED_EOF;
+        }
+        result = result | (bit << shift);
+        shift = shift + 1i32;
+    }
+
+    pass result;
 };
 
-// Skip to the next byte boundary
+// Skip to the next byte boundary (discard remaining bits in current byte).
+// No-op if already byte-aligned.
 pub func:bitreader_skip_to_byte_boundary = NIL(wild BitReader-> : reader) {
-    // Stub: if bit_pos > 0, set bit_pos = 0, byte_pos++
+    if (reader->bit_pos != 0i32) {
+        reader->bit_pos  = 0i32;
+        reader->byte_pos = reader->byte_pos + 1i64;
+    }
     pass;
 };
 
-// Read a 16-bit unsigned integer (assumes we are byte-aligned)
+// Read a 16-bit unsigned integer, little-endian, byte-aligned.
+// Caller must call bitreader_skip_to_byte_boundary first if needed.
+// Returns the value (as int32, upper 16 bits = 0), or ERR_UNEXPECTED_EOF.
 pub func:bitreader_read_uint16 = int32(wild BitReader-> : reader) {
-    // Stub
-    pass 0i32;
+    if ((reader->byte_pos + 2i64) > reader->len) {
+        pass ERR_UNEXPECTED_EOF;
+    }
+    int8->:buf = @cast_unchecked<int8->>(reader->data);
+    int32:b0   = @cast_unchecked<int32>(buf[reader->byte_pos])     & 255i32;
+    int32:b1   = @cast_unchecked<int32>(buf[reader->byte_pos + 1i64]) & 255i32;
+    reader->byte_pos = reader->byte_pos + 2i64;
+    pass b0 | (b1 << 8i32);
 };
 
-// Read a 32-bit unsigned integer (assumes we are byte-aligned)
+// Read a 32-bit unsigned integer, little-endian, byte-aligned.
+// Returns value (possibly negative due to int32 sign) or ERR_UNEXPECTED_EOF.
 pub func:bitreader_read_uint32 = int32(wild BitReader-> : reader) {
-    // Stub
+    if ((reader->byte_pos + 4i64) > reader->len) {
+        pass ERR_UNEXPECTED_EOF;
+    }
+    int8->:buf = @cast_unchecked<int8->>(reader->data);
+    int32:b0   = @cast_unchecked<int32>(buf[reader->byte_pos])         & 255i32;
+    int32:b1   = @cast_unchecked<int32>(buf[reader->byte_pos + 1i64])  & 255i32;
+    int32:b2   = @cast_unchecked<int32>(buf[reader->byte_pos + 2i64])  & 255i32;
+    int32:b3   = @cast_unchecked<int32>(buf[reader->byte_pos + 3i64])  & 255i32;
+    reader->byte_pos = reader->byte_pos + 4i64;
+    pass b0 | (b1 << 8i32) | (b2 << 16i32) | (b3 << 24i32);
+};
+
+// Read a single byte (byte-aligned convenience wrapper).
+// Returns the byte value [0..255] or ERR_UNEXPECTED_EOF.
+pub func:bitreader_read_byte = int32(wild BitReader-> : reader) {
+    if (reader->byte_pos >= reader->len) {
+        pass ERR_UNEXPECTED_EOF;
+    }
+    int8->:buf = @cast_unchecked<int8->>(reader->data);
+    int32:val  = @cast_unchecked<int32>(buf[reader->byte_pos]) & 255i32;
+    reader->byte_pos = reader->byte_pos + 1i64;
+    pass val;
+};
+
+// Returns 1 if there is at least one full byte remaining to read.
+pub func:bitreader_has_bytes = int32(wild BitReader-> : reader) {
+    if (reader->byte_pos < reader->len) { pass 1i32; }
     pass 0i32;
 };
 
-pub func:bitwriter_write_bit = NIL(wild BitWriter-> : writer, int32:bit) {
-    // Stub
-    pass;
+// Returns number of bytes remaining (whole bytes from current byte_pos).
+pub func:bitreader_bytes_remaining = int64(wild BitReader-> : reader) {
+    int64:rem = reader->len - reader->byte_pos;
+    if (rem < 0i64) { pass 0i64; }
+    pass rem;
 };
 
-pub func:bitwriter_write_bits = NIL(wild BitWriter-> : writer, int32:val, int32:count) {
-    // Stub
-    pass;
+// Write a single bit (LSB-first). Returns ERR_OK or ERR_DECOMPRESSION on overflow.
+pub func:bitwriter_write_bit = int32(wild BitWriter-> : writer, int32:bit) {
+    if (writer->byte_pos >= writer->capacity) {
+        pass ERR_DECOMPRESSION;
+    }
+    int8->:buf = @cast_unchecked<int8->>(writer->data);
+    // Read-modify-write current byte
+    int32:byte_val = @cast_unchecked<int32>(buf[writer->byte_pos]) & 255i32;
+    int32:mask     = 1i32 << writer->bit_pos;
+    if ((bit & 1i32) == 1i32) {
+        byte_val = byte_val | mask;
+    } else {
+        byte_val = byte_val & (mask ^ 255i32);
+    }
+    buf[writer->byte_pos] = @cast_unchecked<int8>(byte_val);
+
+    writer->bit_pos = writer->bit_pos + 1i32;
+    if (writer->bit_pos == 8i32) {
+        writer->bit_pos  = 0i32;
+        writer->byte_pos = writer->byte_pos + 1i64;
+        // Pre-zero next byte for clean RMW
+        if (writer->byte_pos < writer->capacity) {
+            buf[writer->byte_pos] = 0i8;
+        }
+    }
+    pass ERR_OK;
+};
+
+// Write `count` bits (LSB-first). Returns ERR_OK or ERR_DECOMPRESSION.
+pub func:bitwriter_write_bits = int32(wild BitWriter-> : writer, int32:val, int32:count) {
+    if (count <= 0i32) { pass ERR_OK; }
+    if (count > 25i32) { count = 25i32; }
+
+    int32:shift = 0i32;
+    while (shift < count) {
+        int32:bit = (val >> shift) & 1i32;
+        int32:res = bitwriter_write_bit(writer, bit);
+        if (res != ERR_OK) { pass res; }
+        shift = shift + 1i32;
+    }
+    pass ERR_OK;
+};
+
+// Write a full byte (byte-aligned convenience wrapper).
+// Returns ERR_OK or ERR_DECOMPRESSION.
+pub func:bitwriter_write_byte = int32(wild BitWriter-> : writer, int32:val) {
+    if (writer->byte_pos >= writer->capacity) {
+        pass ERR_DECOMPRESSION;
+    }
+    int8->:buf = @cast_unchecked<int8->>(writer->data);
+    buf[writer->byte_pos] = @cast_unchecked<int8>(val & 255i32);
+    writer->byte_pos = writer->byte_pos + 1i64;
+    pass ERR_OK;
+};
+
+// Returns how many bytes have been written so far.
+pub func:bitwriter_bytes_written = int64(wild BitWriter-> : writer) {
+    pass writer->byte_pos;
 };

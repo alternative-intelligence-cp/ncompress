@@ -1,22 +1,189 @@
+// test/test_bit_io.npk
+// Comprehensive tests for bit_io.npk — LSB-first bit I/O.
 use "../src/bit_io.npk".*;
+use "../src/errors.npk".*;
 
-pub func:failsafe = int32(tbb32:err) { drop(err);
-    exit(1i32);
-};
+pub func:failsafe = int32(tbb32:err) { drop(err); exit(1i32); };
 
 pub func:main = int32() {
-    BitReader:reader = BitReader{data: 0i64, len: 0i64, byte_pos: 0i64, bit_pos: 0i32};
-    drop(bitreader_init(@reader, 0i64, 0i64));
-    
-    drop(bitreader_skip_to_byte_boundary(@reader));
-    drop(bitreader_read_uint16(@reader));
-    drop(bitreader_read_uint32(@reader));
-    
-    drop(reader);
-    
-    BitWriter:writer = BitWriter{data: 0i64, capacity: 0i64, byte_pos: 0i64, bit_pos: 0i32};
-    drop(bitwriter_init(@writer, 0i64, 0i64));
-    drop(writer);
-    
-    exit 0i32;
+    int32:status = 0i32;
+
+    // Allocate a scratch buffer (16 bytes)
+    wild int8->:buf = nodrop alloc(16i64);
+    int64:addr = @cast_unchecked<int64>(buf);
+
+    // Zero the buffer
+    int64:zi = 0i64;
+    while (zi < 16i64) {
+        buf[zi] = 0i8;
+        zi = zi + 1i64;
+    }
+
+    // =========================================================
+    // TEST 1: Write 8 bits, read them back (LSB-first)
+    // =========================================================
+    // Write byte 0xB2 = 0b10110010 as 8 individual bits
+    // LSB-first: bit0=0, bit1=1, bit2=0, bit3=0, bit4=1, bit5=1, bit6=0, bit7=1
+    BitWriter:writer = BitWriter{data: addr, capacity: 16i64, byte_pos: 0i64, bit_pos: 0i32};
+    drop bitwriter_write_bit(@writer, 0i32); // bit 0
+    drop bitwriter_write_bit(@writer, 1i32); // bit 1
+    drop bitwriter_write_bit(@writer, 0i32); // bit 2
+    drop bitwriter_write_bit(@writer, 0i32); // bit 3
+    drop bitwriter_write_bit(@writer, 1i32); // bit 4
+    drop bitwriter_write_bit(@writer, 1i32); // bit 5
+    drop bitwriter_write_bit(@writer, 0i32); // bit 6
+    drop bitwriter_write_bit(@writer, 1i32); // bit 7
+
+    // Verify the byte in memory is 0xB2 = 178
+    int32:stored_byte = @cast_unchecked<int32>(buf[0i64]) & 255i32;
+    if (stored_byte != 178i32) { status = 1i32; }
+
+    // Now read it back
+    BitReader:reader = BitReader{data: addr, len: 16i64, byte_pos: 0i64, bit_pos: 0i32};
+    int32:rb0 = bitreader_read_bit(@reader);
+    int32:rb1 = bitreader_read_bit(@reader);
+    int32:rb2 = bitreader_read_bit(@reader);
+    int32:rb3 = bitreader_read_bit(@reader);
+    int32:rb4 = bitreader_read_bit(@reader);
+    int32:rb5 = bitreader_read_bit(@reader);
+    int32:rb6 = bitreader_read_bit(@reader);
+    int32:rb7 = bitreader_read_bit(@reader);
+
+    if (rb0 != 0i32) { status = 10i32; }
+    if (rb1 != 1i32) { status = 11i32; }
+    if (rb2 != 0i32) { status = 12i32; }
+    if (rb3 != 0i32) { status = 13i32; }
+    if (rb4 != 1i32) { status = 14i32; }
+    if (rb5 != 1i32) { status = 15i32; }
+    if (rb6 != 0i32) { status = 16i32; }
+    if (rb7 != 1i32) { status = 17i32; }
+
+    // =========================================================
+    // TEST 2: write_bits / read_bits round-trip
+    // =========================================================
+    // Reset buffer and writer
+    buf[0i64] = 0i8;
+    buf[1i64] = 0i8;
+    buf[2i64] = 0i8;
+    buf[3i64] = 0i8;
+
+    BitWriter:w2 = BitWriter{data: addr, capacity: 16i64, byte_pos: 0i64, bit_pos: 0i32};
+
+    // Write value 0x1F5 (9 bits = 0b111110101) — tests crossing byte boundary
+    drop bitwriter_write_bits(@w2, 501i32, 9i32); // 501 = 0x1F5
+
+    // Write another 7 bits: value 0x5B = 91 (7 bits = 1011011)
+    drop bitwriter_write_bits(@w2, 91i32, 7i32);
+
+    // Read them back
+    BitReader:r2 = BitReader{data: addr, len: 16i64, byte_pos: 0i64, bit_pos: 0i32};
+    int32:v1 = bitreader_read_bits(@r2, 9i32);
+    int32:v2 = bitreader_read_bits(@r2, 7i32);
+
+    if (v1 != 501i32) { status = 20i32; }
+    if (v2 != 91i32)  { status = 21i32; }
+
+    // =========================================================
+    // TEST 3: bitreader_read_uint16 (LE, byte-aligned)
+    // =========================================================
+    buf[4i64] = @cast_unchecked<int8>(0xABi32); // low byte
+    buf[5i64] = @cast_unchecked<int8>(0xCDi32); // high byte
+
+    BitReader:r3 = BitReader{data: addr, len: 16i64, byte_pos: 4i64, bit_pos: 0i32};
+    int32:u16 = bitreader_read_uint16(@r3);
+    // 0xAB | (0xCD << 8) = 0xCDAB = 52651
+    if (u16 != 52651i32) { status = 30i32; }
+    // byte_pos should advance by 2
+    if (r3.byte_pos != 6i64) { status = 31i32; }
+
+    // =========================================================
+    // TEST 4: bitreader_read_uint32 (LE, byte-aligned)
+    // =========================================================
+    buf[6i64] = @cast_unchecked<int8>(0x01i32);
+    buf[7i64] = @cast_unchecked<int8>(0x02i32);
+    buf[8i64] = @cast_unchecked<int8>(0x03i32);
+    buf[9i64] = @cast_unchecked<int8>(0x04i32);
+
+    BitReader:r4 = BitReader{data: addr, len: 16i64, byte_pos: 6i64, bit_pos: 0i32};
+    int32:u32 = bitreader_read_uint32(@r4);
+    // 0x01 | (0x02 << 8) | (0x03 << 16) | (0x04 << 24) = 0x04030201 = 67305985
+    if (u32 != 67305985i32) { status = 40i32; }
+    if (r4.byte_pos != 10i64) { status = 41i32; }
+
+    // =========================================================
+    // TEST 5: bitreader_skip_to_byte_boundary
+    // =========================================================
+    BitReader:r5 = BitReader{data: addr, len: 16i64, byte_pos: 0i64, bit_pos: 0i32};
+    // Read 3 bits (now mid-byte)
+    drop bitreader_read_bits(@r5, 3i32);
+    if (r5.bit_pos != 3i32) { status = 50i32; }
+
+    bitreader_skip_to_byte_boundary(@r5);
+    if (r5.bit_pos  != 0i32) { status = 51i32; }
+    if (r5.byte_pos != 1i64) { status = 52i32; }
+
+    // Already aligned — skip should be no-op
+    bitreader_skip_to_byte_boundary(@r5);
+    if (r5.byte_pos != 1i64) { status = 53i32; }
+
+    // =========================================================
+    // TEST 6: EOF detection on read_bit
+    // =========================================================
+    // Create reader at end of buffer
+    BitReader:r6 = BitReader{data: addr, len: 2i64, byte_pos: 2i64, bit_pos: 0i32};
+    int32:eof_bit = bitreader_read_bit(@r6);
+    if (eof_bit != ERR_UNEXPECTED_EOF) { status = 60i32; }
+
+    // EOF on read_bits
+    BitReader:r6b = BitReader{data: addr, len: 1i64, byte_pos: 0i64, bit_pos: 0i32};
+    // Read 8 bits from 1-byte buffer — OK
+    int32:okv = bitreader_read_bits(@r6b, 8i32);
+    drop okv;
+    // Next read should be EOF
+    int32:eof_bits = bitreader_read_bits(@r6b, 1i32);
+    if (eof_bits != ERR_UNEXPECTED_EOF) { status = 61i32; }
+
+    // EOF on read_uint16
+    BitReader:r6c = BitReader{data: addr, len: 1i64, byte_pos: 0i64, bit_pos: 0i32};
+    int32:eof_u16 = bitreader_read_uint16(@r6c);
+    if (eof_u16 != ERR_UNEXPECTED_EOF) { status = 62i32; }
+
+    // =========================================================
+    // TEST 7: bitwriter overflow detection
+    // =========================================================
+    // Create writer at end of buffer
+    BitWriter:w7 = BitWriter{data: addr, capacity: 2i64, byte_pos: 2i64, bit_pos: 0i32};
+    int32:ovf = bitwriter_write_bit(@w7, 1i32);
+    if (ovf != ERR_DECOMPRESSION) { status = 70i32; }
+
+    // =========================================================
+    // TEST 8: bitreader_has_bytes and bytes_remaining
+    // =========================================================
+    BitReader:r8 = BitReader{data: addr, len: 4i64, byte_pos: 0i64, bit_pos: 0i32};
+    if (bitreader_has_bytes(@r8) != 1i32)       { status = 80i32; }
+    if (bitreader_bytes_remaining(@r8) != 4i64)  { status = 81i32; }
+    drop bitreader_read_bits(@r8, 24i32); // consume 3 bytes
+    if (bitreader_bytes_remaining(@r8) != 1i64)  { status = 82i32; }
+    drop bitreader_read_bits(@r8, 8i32);  // consume last byte
+    if (bitreader_has_bytes(@r8) != 0i32)        { status = 83i32; }
+    if (bitreader_bytes_remaining(@r8) != 0i64)  { status = 84i32; }
+
+    // =========================================================
+    // TEST 9: Zero-count read/write is a no-op
+    // =========================================================
+    BitWriter:w9 = BitWriter{data: addr, capacity: 16i64, byte_pos: 0i64, bit_pos: 0i32};
+    int32:r9w = bitwriter_write_bits(@w9, 0xFFi32, 0i32);
+    if (r9w != ERR_OK) { status = 90i32; }
+    if (w9.byte_pos != 0i64) { status = 91i32; }
+
+    BitReader:r9 = BitReader{data: addr, len: 16i64, byte_pos: 0i64, bit_pos: 0i32};
+    int32:r9v = bitreader_read_bits(@r9, 0i32);
+    if (r9v != 0i32) { status = 92i32; }
+
+    // =========================================================
+    // Cleanup
+    // =========================================================
+    dalloc(buf);
+
+    exit status;
 };
