@@ -27,3 +27,6 @@ build-*/
 *.swp
 *~
 .DS_Store
+test/test_bit_io
+test/test_checksum
+test/test_lzw

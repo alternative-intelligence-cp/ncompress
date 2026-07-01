@@ -1,44 +1,64 @@
-// mem.npk — raw memory helpers for ncompress
-// Uses int64 loads for byte access to avoid managed int8-> pointer lifecycle issues.
+// mem.npk — raw memory helpers for ncompress.
+// Uses nitpick_libc_mem externals to bypass the GC — these are C functions
+// that operate on raw addresses without creating managed pointers.
+//
+// All functions take absolute byte addresses (int64) as the first argument.
+// The nitpick_libc_mem functions take (ptr, offset) where ptr+offset = address.
+// We pass ptr=addr, offset=0 for all single-address calls.
 
-pub func:store64 = int8(int64:addr, int64:val) {
-    int64->:ptr = @cast_unchecked<int64->>(addr);
-    ptr[0i64] = val;
-    pass 0i8;
-};
+extern "nitpick_libc_mem" {
+    func:nitpick_libc_mem_read_byte  = int32(int64:ptr, int64:offset);
+    func:nitpick_libc_mem_write_byte = void(int64:ptr, int64:offset, int32:val);
+    func:nitpick_libc_mem_read_i32   = int32(int64:ptr, int64:offset);
+    func:nitpick_libc_mem_write_i32  = void(int64:ptr, int64:offset, int32:val);
+    func:nitpick_libc_mem_read_i64   = int64(int64:ptr, int64:offset);
+    func:nitpick_libc_mem_write_i64  = void(int64:ptr, int64:offset, int64:val);
+    func:nitpick_libc_mem_zero       = void(int64:ptr, int64:nbytes);
+}
 
-pub func:load64 = int64(int64:addr) {
-    int64->:ptr = @cast_unchecked<int64->>(addr);
-    pass ptr[0i64];
-};
-
-pub func:store32 = int8(int64:addr, int32:val) {
-    int32->:ptr = @cast_unchecked<int32->>(addr);
-    ptr[0i64] = val;
-    pass 0i8;
-};
-
-pub func:load32 = int32(int64:addr) {
-    int32->:ptr = @cast_unchecked<int32->>(addr);
-    pass ptr[0i64];
-};
-
-pub func:store8 = int8(int64:addr, int8:val) {
-    int8->:ptr = @cast_unchecked<int8->>(addr);
-    ptr[0i64] = val;
-    pass 0i8;
-};
-
-// load8: reads one byte from `addr` using an aligned int64 load + shift.
-// Avoids creating a long-lived managed int8-> pointer.
+// load8: reads one byte from absolute address `addr`.
 pub func:load8 = int8(int64:addr) {
-    // Align down to 8-byte boundary
-    int64:aligned = addr & -8i64; // -8 in two's complement masks off low 3 bits
-    int64->:ptr   = @cast_unchecked<int64->>(aligned);
-    int64:word    = ptr[0i64];
-    // Byte offset within the 64-bit word (little-endian: byte 0 is LSB)
-    int64:offset  = (addr & 7i64) * 8i64; // shift amount: 0, 8, 16, 24, 32, 40, 48, 56
-    int32:shift   = @cast_unchecked<int32>(offset);
-    int32:byte    = @cast_unchecked<int32>(word >> @cast_unchecked<int64>(shift)) & 255i32;
-    pass @cast_unchecked<int8>(byte);
+    int32:val = nitpick_libc_mem_read_byte(addr, 0i64);
+    pass @cast_unchecked<int8>(val & 255i32);
+};
+
+// store8: writes one byte to absolute address `addr`.
+pub func:store8 = int8(int64:addr, int8:val) {
+    nitpick_libc_mem_write_byte(addr, 0i64, @cast_unchecked<int32>(val) & 255i32);
+    pass 0i8;
+};
+
+// load32: reads 4 bytes LE from `addr`.
+pub func:load32 = int32(int64:addr) {
+    pass nitpick_libc_mem_read_i32(addr, 0i64);
+};
+
+// store32: writes 4 bytes LE to `addr`.
+pub func:store32 = int8(int64:addr, int32:val) {
+    nitpick_libc_mem_write_i32(addr, 0i64, val);
+    pass 0i8;
+};
+
+// load64: reads 8 bytes LE from `addr`.
+pub func:load64 = int64(int64:addr) {
+    pass nitpick_libc_mem_read_i64(addr, 0i64);
+};
+
+// store64: writes 8 bytes LE to `addr`.
+pub func:store64 = int8(int64:addr, int64:val) {
+    nitpick_libc_mem_write_i64(addr, 0i64, val);
+    pass 0i8;
+};
+
+// mem_zero: zero-fill `nbytes` bytes starting at `addr`.
+pub func:mem_zero = NIL(int64:addr, int64:nbytes) {
+    nitpick_libc_mem_zero(addr, nbytes);
+    pass;
+};
+
+// load_le16: reads 2 bytes LE from addr.
+pub func:load_le16 = int32(int64:addr) {
+    int32:b0 = nitpick_libc_mem_read_byte(addr,         0i64) & 255i32;
+    int32:b1 = nitpick_libc_mem_read_byte(addr + 1i64, 0i64) & 255i32;
+    pass b0 | (b1 << 8i32);
 };
