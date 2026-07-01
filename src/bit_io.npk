@@ -57,7 +57,7 @@ pub func:bitreader_read_bit = int32(wild BitReader-> : reader) {
     }
 
     // Load current byte (avoid managed int8-> lifecycle issues: use load8)
-    int32:byte_val = @cast_unchecked<int32>(raw load8(reader->data + reader->byte_pos)) & 255i32;
+    int32:byte_val = cast_unchecked<int32>(raw load8(reader->data + reader->byte_pos)) & 255i32;
 
     // Extract bit at bit_pos (LSB-first)
     int32:bit = (byte_val >> reader->bit_pos) & 1i32;
@@ -110,8 +110,8 @@ pub func:bitreader_read_uint16 = int32(wild BitReader-> : reader) {
     if ((reader->byte_pos + 2i64) > reader->len) {
         pass ERR_UNEXPECTED_EOF;
     }
-    int32:b0   = @cast_unchecked<int32>(raw load8(reader->data + reader->byte_pos))         & 255i32;
-    int32:b1   = @cast_unchecked<int32>(raw load8(reader->data + reader->byte_pos + 1i64)) & 255i32;
+    int32:b0   = cast_unchecked<int32>(raw load8(reader->data + reader->byte_pos))         & 255i32;
+    int32:b1   = cast_unchecked<int32>(raw load8(reader->data + reader->byte_pos + 1i64)) & 255i32;
     reader->byte_pos = reader->byte_pos + 2i64;
     pass b0 | (b1 << 8i32);
 };
@@ -122,10 +122,10 @@ pub func:bitreader_read_uint32 = int32(wild BitReader-> : reader) {
     if ((reader->byte_pos + 4i64) > reader->len) {
         pass ERR_UNEXPECTED_EOF;
     }
-    int32:b0   = @cast_unchecked<int32>(raw load8(reader->data + reader->byte_pos))         & 255i32;
-    int32:b1   = @cast_unchecked<int32>(raw load8(reader->data + reader->byte_pos + 1i64)) & 255i32;
-    int32:b2   = @cast_unchecked<int32>(raw load8(reader->data + reader->byte_pos + 2i64)) & 255i32;
-    int32:b3   = @cast_unchecked<int32>(raw load8(reader->data + reader->byte_pos + 3i64)) & 255i32;
+    int32:b0   = cast_unchecked<int32>(raw load8(reader->data + reader->byte_pos))         & 255i32;
+    int32:b1   = cast_unchecked<int32>(raw load8(reader->data + reader->byte_pos + 1i64)) & 255i32;
+    int32:b2   = cast_unchecked<int32>(raw load8(reader->data + reader->byte_pos + 2i64)) & 255i32;
+    int32:b3   = cast_unchecked<int32>(raw load8(reader->data + reader->byte_pos + 3i64)) & 255i32;
     reader->byte_pos = reader->byte_pos + 4i64;
     pass b0 | (b1 << 8i32) | (b2 << 16i32) | (b3 << 24i32);
 };
@@ -136,7 +136,7 @@ pub func:bitreader_read_byte = int32(wild BitReader-> : reader) {
     if (reader->byte_pos >= reader->len) {
         pass ERR_UNEXPECTED_EOF;
     }
-    int32:val  = @cast_unchecked<int32>(raw load8(reader->data + reader->byte_pos)) & 255i32;
+    int32:val  = cast_unchecked<int32>(raw load8(reader->data + reader->byte_pos)) & 255i32;
     reader->byte_pos = reader->byte_pos + 1i64;
     pass val;
 };
@@ -160,14 +160,14 @@ pub func:bitwriter_write_bit = int32(wild BitWriter-> : writer, int32:bit) {
         pass ERR_DECOMPRESSION;
     }
     // Read-modify-write current byte (avoid managed int8-> lifecycle issues)
-    int32:byte_val = @cast_unchecked<int32>(raw load8(writer->data + writer->byte_pos)) & 255i32;
+    int32:byte_val = cast_unchecked<int32>(raw load8(writer->data + writer->byte_pos)) & 255i32;
     int32:mask     = 1i32 << writer->bit_pos;
     if ((bit & 1i32) == 1i32) {
         byte_val = byte_val | mask;
     } else {
         byte_val = byte_val & (mask ^ 255i32);
     }
-    drop raw store8(writer->data + writer->byte_pos, @cast_unchecked<int8>(byte_val));
+    drop raw store8(writer->data + writer->byte_pos, cast_unchecked<int8>(byte_val));
 
     writer->bit_pos = writer->bit_pos + 1i32;
     if (writer->bit_pos == 8i32) {
@@ -202,7 +202,7 @@ pub func:bitwriter_write_byte = int32(wild BitWriter-> : writer, int32:val) {
     if (writer->byte_pos >= writer->capacity) {
         pass ERR_DECOMPRESSION;
     }
-    drop raw store8(writer->data + writer->byte_pos, @cast_unchecked<int8>(val & 255i32));
+    drop raw store8(writer->data + writer->byte_pos, cast_unchecked<int8>(val & 255i32));
     writer->byte_pos = writer->byte_pos + 1i64;
     pass ERR_OK;
 };

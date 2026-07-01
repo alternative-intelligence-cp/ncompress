@@ -59,7 +59,7 @@ pub func:huffmantree_build_from_lengths = int32(wild HuffmanTree-> : tree,
     // Step 0: Zero the counts array [0..HUFFMAN_MAX_BITS]
     int32:ci = 0i32;
     while (ci <= HUFFMAN_MAX_BITS) {
-        drop raw store32(counts_ptr + @cast_unchecked<int64>(ci * 4i32), 0i32);
+        drop raw store32(counts_ptr + cast_unchecked<int64>(ci * 4i32), 0i32);
         ci = ci + 1i32;
     }
 
@@ -67,11 +67,11 @@ pub func:huffmantree_build_from_lengths = int32(wild HuffmanTree-> : tree,
     int32:max_len_found = 0i32;
     int32:si = 0i32;
     while (si < num_lengths) {
-        int32:len = raw load32(lengths_ptr + @cast_unchecked<int64>(si * 4i32));
+        int32:len = raw load32(lengths_ptr + cast_unchecked<int64>(si * 4i32));
         if (len > 0i32) {
             if (len > HUFFMAN_MAX_BITS) { pass ERR_DECOMPRESSION; }
-            int32:old_count = raw load32(counts_ptr + @cast_unchecked<int64>(len * 4i32));
-            drop raw store32(counts_ptr + @cast_unchecked<int64>(len * 4i32), old_count + 1i32);
+            int32:old_count = raw load32(counts_ptr + cast_unchecked<int64>(len * 4i32));
+            drop raw store32(counts_ptr + cast_unchecked<int64>(len * 4i32), old_count + 1i32);
             if (len > max_len_found) { max_len_found = len; }
         }
         si = si + 1i32;
@@ -87,7 +87,7 @@ pub func:huffmantree_build_from_lengths = int32(wild HuffmanTree-> : tree,
     int32:total = 0i32;
     int32:oi = 1i32;
     while (oi <= max_len_found) {
-        total = total + raw load32(counts_ptr + @cast_unchecked<int64>(oi * 4i32));
+        total = total + raw load32(counts_ptr + cast_unchecked<int64>(oi * 4i32));
         oi = oi + 1i32;
     }
     tree->num_syms = total;
@@ -109,9 +109,9 @@ pub func:huffmantree_build_from_lengths = int32(wild HuffmanTree-> : tree,
     while (fill_len <= max_len_found) {
         int32:fi = 0i32;
         while (fi < num_lengths) {
-            int32:flen = raw load32(lengths_ptr + @cast_unchecked<int64>(fi * 4i32));
+            int32:flen = raw load32(lengths_ptr + cast_unchecked<int64>(fi * 4i32));
             if (flen == fill_len) {
-                drop raw store32(tree->symbols + @cast_unchecked<int64>(sym_pos * 4i32), fi);
+                drop raw store32(tree->symbols + cast_unchecked<int64>(sym_pos * 4i32), fi);
                 sym_pos = sym_pos + 1i32;
             }
             fi = fi + 1i32;
@@ -139,11 +139,11 @@ pub func:huffmantree_decode_symbol = int32(wild HuffmanTree-> : tree,
         if (bit < 0i32) { pass ERR_UNEXPECTED_EOF; }
 
         code = (code << 1i32) | bit;
-        int32:count = raw load32(tree->counts + @cast_unchecked<int64>(len * 4i32));
+        int32:count = raw load32(tree->counts + cast_unchecked<int64>(len * 4i32));
         if ((code - first) < count) {
             // Found! Symbol is at index + (code - first)
             int32:sym_idx = index + (code - first);
-            pass raw load32(tree->symbols + @cast_unchecked<int64>(sym_idx * 4i32));
+            pass raw load32(tree->symbols + cast_unchecked<int64>(sym_idx * 4i32));
         }
         index = index + count;
         first = (first + count) << 1i32;
@@ -162,19 +162,19 @@ pub func:huffmantree_init_fixed_literal = int32(wild HuffmanTree-> : tree,
                                                  int64:lengths_ptr) {
     int32:i = 0i32;
     while (i < 144i32) {
-        drop raw store32(lengths_ptr + @cast_unchecked<int64>(i * 4i32), 8i32);
+        drop raw store32(lengths_ptr + cast_unchecked<int64>(i * 4i32), 8i32);
         i = i + 1i32;
     }
     while (i < 256i32) {
-        drop raw store32(lengths_ptr + @cast_unchecked<int64>(i * 4i32), 9i32);
+        drop raw store32(lengths_ptr + cast_unchecked<int64>(i * 4i32), 9i32);
         i = i + 1i32;
     }
     while (i < 280i32) {
-        drop raw store32(lengths_ptr + @cast_unchecked<int64>(i * 4i32), 7i32);
+        drop raw store32(lengths_ptr + cast_unchecked<int64>(i * 4i32), 7i32);
         i = i + 1i32;
     }
     while (i < 288i32) {
-        drop raw store32(lengths_ptr + @cast_unchecked<int64>(i * 4i32), 8i32);
+        drop raw store32(lengths_ptr + cast_unchecked<int64>(i * 4i32), 8i32);
         i = i + 1i32;
     }
 
@@ -187,7 +187,7 @@ pub func:huffmantree_init_fixed_distance = int32(wild HuffmanTree-> : tree,
                                                   int64:lengths_ptr) {
     int32:i = 0i32;
     while (i < 32i32) {
-        drop raw store32(lengths_ptr + @cast_unchecked<int64>(i * 4i32), 5i32);
+        drop raw store32(lengths_ptr + cast_unchecked<int64>(i * 4i32), 5i32);
         i = i + 1i32;
     }
 

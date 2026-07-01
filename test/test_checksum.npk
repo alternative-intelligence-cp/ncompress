@@ -15,7 +15,7 @@ pub func:main = int32() {
     // zlib.adler32(b"Mark Adler") = 0x13070394 = 319226772
     // =========================================================
     wild int8->:s1 = nodrop alloc(16i64);
-    int64:a1 = @cast_unchecked<int64>(s1);
+    int64:a1 = cast_unchecked<int64>(s1);
     drop raw store8(a1 + 0i64,  77i8);
     drop raw store8(a1 + 1i64,  97i8);
     drop raw store8(a1 + 2i64, 114i8);
@@ -47,7 +47,7 @@ pub func:main = int32() {
     // zlib.adler32(b"\x01") = 131074 = 0x00020002
     // =========================================================
     wild int8->:s3 = nodrop alloc(8i64);
-    int64:a3 = @cast_unchecked<int64>(s3);
+    int64:a3 = cast_unchecked<int64>(s3);
     drop raw store8(a3, 1i8);
 
     Adler32:adler3 = Adler32{a: 1i32, b: 0i32};
@@ -61,7 +61,7 @@ pub func:main = int32() {
     // a=295, b=589; result = 38600999 = 0x024D0127
     // =========================================================
     wild int8->:s4 = nodrop alloc(8i64);
-    int64:a4 = @cast_unchecked<int64>(s4);
+    int64:a4 = cast_unchecked<int64>(s4);
     drop raw store8(a4 + 0i64, 97i8);
     drop raw store8(a4 + 1i64, 98i8);
     drop raw store8(a4 + 2i64, 99i8);
@@ -95,7 +95,7 @@ pub func:main = int32() {
     // zlib.crc32(b"123456789") = 0xCBF43926 = -873187034 signed
     // =========================================================
     wild int8->:s6 = nodrop alloc(16i64);
-    int64:a6 = @cast_unchecked<int64>(s6);
+    int64:a6 = cast_unchecked<int64>(s6);
     drop raw store8(a6 + 0i64, 49i8);
     drop raw store8(a6 + 1i64, 50i8);
     drop raw store8(a6 + 2i64, 51i8);

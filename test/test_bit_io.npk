@@ -11,7 +11,7 @@ pub func:main = int32() {
 
     // Allocate a scratch buffer (16 bytes)
     wild int8->:buf = nodrop alloc(16i64);
-    int64:addr = @cast_unchecked<int64>(buf);
+    int64:addr = cast_unchecked<int64>(buf);
 
     // Zero the buffer
     int64:zi = 0i64;
@@ -36,7 +36,7 @@ pub func:main = int32() {
     drop raw bitwriter_write_bit(@writer, 1i32); // bit 7
 
     // Verify the byte in memory is 0xB2 = 178
-    int32:stored_byte = @cast_unchecked<int32>(raw load8(addr + 0i64)) & 255i32;
+    int32:stored_byte = cast_unchecked<int32>(raw load8(addr + 0i64)) & 255i32;
     if (stored_byte != 178i32) { status = 1i32; }
 
     // Now read it back
@@ -87,8 +87,8 @@ pub func:main = int32() {
     // =========================================================
     // TEST 3: bitreader_read_uint16 (LE, byte-aligned)
     // =========================================================
-    drop raw store8(addr + 4i64, @cast_unchecked<int8>(0xABi32)); // low byte
-    drop raw store8(addr + 5i64, @cast_unchecked<int8>(0xCDi32)); // high byte
+    drop raw store8(addr + 4i64, cast_unchecked<int8>(0xABi32)); // low byte
+    drop raw store8(addr + 5i64, cast_unchecked<int8>(0xCDi32)); // high byte
 
     BitReader:r3 = BitReader{data: addr, len: 16i64, byte_pos: 4i64, bit_pos: 0i32};
     int32:u16 = raw bitreader_read_uint16(@r3);
@@ -100,10 +100,10 @@ pub func:main = int32() {
     // =========================================================
     // TEST 4: bitreader_read_uint32 (LE, byte-aligned)
     // =========================================================
-    drop raw store8(addr + 6i64, @cast_unchecked<int8>(0x01i32));
-    drop raw store8(addr + 7i64, @cast_unchecked<int8>(0x02i32));
-    drop raw store8(addr + 8i64, @cast_unchecked<int8>(0x03i32));
-    drop raw store8(addr + 9i64, @cast_unchecked<int8>(0x04i32));
+    drop raw store8(addr + 6i64, cast_unchecked<int8>(0x01i32));
+    drop raw store8(addr + 7i64, cast_unchecked<int8>(0x02i32));
+    drop raw store8(addr + 8i64, cast_unchecked<int8>(0x03i32));
+    drop raw store8(addr + 9i64, cast_unchecked<int8>(0x04i32));
 
     BitReader:r4 = BitReader{data: addr, len: 16i64, byte_pos: 6i64, bit_pos: 0i32};
     int32:u32 = raw bitreader_read_uint32(@r4);

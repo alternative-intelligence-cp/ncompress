@@ -18,9 +18,9 @@ pub func:main = int32() {
     wild int8->:prefix_buf = nodrop alloc(16384i64); // 4096 * 4 bytes for int32[]
     wild int8->:suffix_buf = nodrop alloc(4096i64);
     wild int8->:stack_buf  = nodrop alloc(4096i64);
-    int64:prefix_addr = @cast_unchecked<int64>(prefix_buf);
-    int64:suffix_addr = @cast_unchecked<int64>(suffix_buf);
-    int64:stack_addr  = @cast_unchecked<int64>(stack_buf);
+    int64:prefix_addr = cast_unchecked<int64>(prefix_buf);
+    int64:suffix_addr = cast_unchecked<int64>(suffix_buf);
+    int64:stack_addr  = cast_unchecked<int64>(stack_buf);
 
     // =========================================================
     // TEST 1: Decode [0,1,2,0,1,2], min_code_size=2
@@ -28,13 +28,13 @@ pub func:main = int32() {
     // Expected output: [0, 1, 2, 0, 1, 2] (6 bytes)
     // =========================================================
     wild int8->:in1 = nodrop alloc(8i64);
-    int64:a1 = @cast_unchecked<int64>(in1);
+    int64:a1 = cast_unchecked<int64>(in1);
     drop raw store8(a1 + 0i64, 68i8);
     drop raw store8(a1 + 1i64, 100i8);
     drop raw store8(a1 + 2i64, 82i8);
 
     wild int8->:out1 = nodrop alloc(16i64);
-    int64:o1 = @cast_unchecked<int64>(out1);
+    int64:o1 = cast_unchecked<int64>(out1);
 
     BitReader:reader1 = BitReader{data: 0i64, len: 0i64, byte_pos: 0i64, bit_pos: 0i32};
     drop bitreader_init(@reader1, a1, 3i64);
@@ -50,12 +50,12 @@ pub func:main = int32() {
     if (r1 != ERR_OK)           { status = 1i32; }
     if (state1.output_pos != 6i64) { status = 2i32; }
 
-    if ((@cast_unchecked<int32>(raw load8(o1 + 0i64)) & 255i32) != 0i32) { status = 3i32; }
-    if ((@cast_unchecked<int32>(raw load8(o1 + 1i64)) & 255i32) != 1i32) { status = 4i32; }
-    if ((@cast_unchecked<int32>(raw load8(o1 + 2i64)) & 255i32) != 2i32) { status = 5i32; }
-    if ((@cast_unchecked<int32>(raw load8(o1 + 3i64)) & 255i32) != 0i32) { status = 6i32; }
-    if ((@cast_unchecked<int32>(raw load8(o1 + 4i64)) & 255i32) != 1i32) { status = 7i32; }
-    if ((@cast_unchecked<int32>(raw load8(o1 + 5i64)) & 255i32) != 2i32) { status = 8i32; }
+    if ((cast_unchecked<int32>(raw load8(o1 + 0i64)) & 255i32) != 0i32) { status = 3i32; }
+    if ((cast_unchecked<int32>(raw load8(o1 + 1i64)) & 255i32) != 1i32) { status = 4i32; }
+    if ((cast_unchecked<int32>(raw load8(o1 + 2i64)) & 255i32) != 2i32) { status = 5i32; }
+    if ((cast_unchecked<int32>(raw load8(o1 + 3i64)) & 255i32) != 0i32) { status = 6i32; }
+    if ((cast_unchecked<int32>(raw load8(o1 + 4i64)) & 255i32) != 1i32) { status = 7i32; }
+    if ((cast_unchecked<int32>(raw load8(o1 + 5i64)) & 255i32) != 2i32) { status = 8i32; }
 
     dalloc(in1);
     dalloc(out1);

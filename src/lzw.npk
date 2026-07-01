@@ -60,17 +60,17 @@ pub func:lzwstate_init = NIL(wild LzwState-> : state, int64:out_ptr, int64:out_c
 func:_lzw_emit = int32(wild LzwState-> : state, int32:byte_val) {
     if (state->output_pos >= state->output_cap) { pass ERR_DECOMPRESSION; }
     drop raw store8(state->output_buffer + state->output_pos,
-                    @cast_unchecked<int8>(byte_val & 255i32));
+                    cast_unchecked<int8>(byte_val & 255i32));
     state->output_pos = state->output_pos + 1i64;
     pass ERR_OK;
 };
 
 // Write a prefix/suffix entry into the code table.
 func:_lzw_table_set = NIL(wild LzwState-> : state, int32:code, int32:prefix, int32:suffix) {
-    int64:prefix_addr = state->prefix_table + @cast_unchecked<int64>(code * 4i32);
+    int64:prefix_addr = state->prefix_table + cast_unchecked<int64>(code * 4i32);
     drop raw store32(prefix_addr, prefix);
-    int64:suffix_addr = state->suffix_table + @cast_unchecked<int64>(code);
-    drop raw store8(suffix_addr, @cast_unchecked<int8>(suffix & 255i32));
+    int64:suffix_addr = state->suffix_table + cast_unchecked<int64>(code);
+    drop raw store8(suffix_addr, cast_unchecked<int8>(suffix & 255i32));
     pass;
 };
 
@@ -103,7 +103,7 @@ pub func:lzw_decompress = int32(wild BitReader-> : reader, wild LzwState-> : sta
     if (prev_code == eoi_code) { pass ERR_OK; } // empty stream
     if (prev_code >= next_code) { pass ERR_DECOMPRESSION; }
     // Emit the first code's single byte
-    int32:first_byte = @cast_unchecked<int32>(raw load8(state->suffix_table + @cast_unchecked<int64>(prev_code))) & 255i32;
+    int32:first_byte = cast_unchecked<int32>(raw load8(state->suffix_table + cast_unchecked<int64>(prev_code))) & 255i32;
     drop _lzw_emit(state, first_byte);
 
     // Main decode loop
@@ -127,7 +127,7 @@ pub func:lzw_decompress = int32(wild BitReader-> : reader, wild LzwState-> : sta
                 if (prev_code == eoi_code) {
                     done = 1i32;
                 } else {
-                    first_byte = @cast_unchecked<int32>(raw load8(state->suffix_table + @cast_unchecked<int64>(prev_code))) & 255i32;
+                    first_byte = cast_unchecked<int32>(raw load8(state->suffix_table + cast_unchecked<int64>(prev_code))) & 255i32;
                     drop _lzw_emit(state, first_byte);
                 }
             } else {
@@ -145,15 +145,15 @@ pub func:lzw_decompress = int32(wild BitReader-> : reader, wild LzwState-> : sta
                 int32:cur = trace_code;
                 while (cur >= 0i32) {
                     if (stack_top >= LZW_MAX_STACK) { pass ERR_DECOMPRESSION; }
-                    int32:suf = @cast_unchecked<int32>(raw load8(state->suffix_table + @cast_unchecked<int64>(cur))) & 255i32;
-                    drop raw store8(state->stack_ptr + @cast_unchecked<int64>(stack_top), @cast_unchecked<int8>(suf));
+                    int32:suf = cast_unchecked<int32>(raw load8(state->suffix_table + cast_unchecked<int64>(cur))) & 255i32;
+                    drop raw store8(state->stack_ptr + cast_unchecked<int64>(stack_top), cast_unchecked<int8>(suf));
                     stack_top = stack_top + 1i32;
-                    int32:pre = raw load32(state->prefix_table + @cast_unchecked<int64>(cur * 4i32));
+                    int32:pre = raw load32(state->prefix_table + cast_unchecked<int64>(cur * 4i32));
                     cur = pre;
                 }
 
                 // The bottom byte of the chain is the "first" byte of this code
-                int32:bottom_byte = @cast_unchecked<int32>(raw load8(state->stack_ptr + @cast_unchecked<int64>(stack_top - 1i32))) & 255i32;
+                int32:bottom_byte = cast_unchecked<int32>(raw load8(state->stack_ptr + cast_unchecked<int64>(stack_top - 1i32))) & 255i32;
 
                 // If code was new (code == next_code), emit bottom_byte first
                 if (is_new_code == 1i32) {
@@ -163,7 +163,7 @@ pub func:lzw_decompress = int32(wild BitReader-> : reader, wild LzwState-> : sta
                 // Emit the stack in reverse (stack_top-1 down to 0)
                 int32:si = stack_top - 1i32;
                 while (si >= 0i32) {
-                    int32:emit_byte = @cast_unchecked<int32>(raw load8(state->stack_ptr + @cast_unchecked<int64>(si))) & 255i32;
+                    int32:emit_byte = cast_unchecked<int32>(raw load8(state->stack_ptr + cast_unchecked<int64>(si))) & 255i32;
                     drop _lzw_emit(state, emit_byte);
                     si = si - 1i32;
                 }

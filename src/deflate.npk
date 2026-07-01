@@ -39,7 +39,7 @@ pub func:deflatestate_init = NIL(wild DeflateState-> : state, int64:out_ptr, int
 func:_deflate_emit = int32(wild DeflateState-> : state, int32:byte_val) {
     if (state->output_pos >= state->output_cap) { pass ERR_DECOMPRESSION; }
     drop raw store8(state->output_buffer + state->output_pos,
-                    @cast_unchecked<int8>(byte_val & 255i32));
+                    cast_unchecked<int8>(byte_val & 255i32));
     state->output_pos = state->output_pos + 1i64;
     pass ERR_OK;
 };
@@ -47,8 +47,8 @@ func:_deflate_emit = int32(wild DeflateState-> : state, int32:byte_val) {
 // Copy `length` bytes from (output_pos - distance) to output_pos
 // This handles overlapping copies (e.g., run-length encoding where distance < length)
 func:_deflate_copy_back = int32(wild DeflateState-> : state, int32:length, int32:distance) {
-    int64:dist64 = @cast_unchecked<int64>(distance);
-    int64:len64  = @cast_unchecked<int64>(length);
+    int64:dist64 = cast_unchecked<int64>(distance);
+    int64:len64  = cast_unchecked<int64>(length);
 
     if (state->output_pos - dist64 < 0i64) { pass ERR_DECOMPRESSION; }
     if (state->output_pos + len64 > state->output_cap) { pass ERR_DECOMPRESSION; }
@@ -56,9 +56,9 @@ func:_deflate_copy_back = int32(wild DeflateState-> : state, int32:length, int32
     int64:src = state->output_pos - dist64;
     int64:ci = 0i64;
     while (ci < len64) {
-        int32:byte_val = @cast_unchecked<int32>(raw load8(state->output_buffer + src + ci)) & 255i32;
+        int32:byte_val = cast_unchecked<int32>(raw load8(state->output_buffer + src + ci)) & 255i32;
         drop raw store8(state->output_buffer + state->output_pos + ci,
-                        @cast_unchecked<int8>(byte_val));
+                        cast_unchecked<int8>(byte_val));
         ci = ci + 1i64;
     }
     state->output_pos = state->output_pos + len64;
@@ -294,7 +294,7 @@ pub func:deflate_process_dynamic = int32(wild BitReader-> : reader,
         if (ci == 17i32) { perm_idx = 1i32; }
         if (ci == 18i32) { perm_idx = 15i32; }
 
-        drop raw store32(cl_lens + @cast_unchecked<int64>(perm_idx * 4i32), bits);
+        drop raw store32(cl_lens + cast_unchecked<int64>(perm_idx * 4i32), bits);
         ci = ci + 1i32;
     }
 
@@ -325,7 +325,7 @@ pub func:deflate_process_dynamic = int32(wild BitReader-> : reader,
 
         if (sym <= 15i32) {
             // Literal code length
-            drop raw store32(all_lens + @cast_unchecked<int64>(li * 4i32), sym);
+            drop raw store32(all_lens + cast_unchecked<int64>(li * 4i32), sym);
             li = li + 1i32;
         } else {
             if (sym == 16i32) {
@@ -346,7 +346,7 @@ pub func:deflate_process_dynamic = int32(wild BitReader-> : reader,
                     pass ERR_UNEXPECTED_EOF;
                 }
                 rep_count = rep_count + 3i32;
-                int32:prev_len = raw load32(all_lens + @cast_unchecked<int64>((li - 1i32) * 4i32));
+                int32:prev_len = raw load32(all_lens + cast_unchecked<int64>((li - 1i32) * 4i32));
                 int32:ri = 0i32;
                 while (ri < rep_count) {
                     if (li >= total_lens) {
@@ -356,7 +356,7 @@ pub func:deflate_process_dynamic = int32(wild BitReader-> : reader,
                         nitpick_libc_mem_free(dist_counts); nitpick_libc_mem_free(dist_syms);
                         pass ERR_DECOMPRESSION;
                     }
-                    drop raw store32(all_lens + @cast_unchecked<int64>(li * 4i32), prev_len);
+                    drop raw store32(all_lens + cast_unchecked<int64>(li * 4i32), prev_len);
                     li = li + 1i32;
                     ri = ri + 1i32;
                 }
@@ -381,7 +381,7 @@ pub func:deflate_process_dynamic = int32(wild BitReader-> : reader,
                             nitpick_libc_mem_free(dist_counts); nitpick_libc_mem_free(dist_syms);
                             pass ERR_DECOMPRESSION;
                         }
-                        drop raw store32(all_lens + @cast_unchecked<int64>(li * 4i32), 0i32);
+                        drop raw store32(all_lens + cast_unchecked<int64>(li * 4i32), 0i32);
                         li = li + 1i32;
                         ri17 = ri17 + 1i32;
                     }
@@ -405,7 +405,7 @@ pub func:deflate_process_dynamic = int32(wild BitReader-> : reader,
                             nitpick_libc_mem_free(dist_counts); nitpick_libc_mem_free(dist_syms);
                             pass ERR_DECOMPRESSION;
                         }
-                        drop raw store32(all_lens + @cast_unchecked<int64>(li * 4i32), 0i32);
+                        drop raw store32(all_lens + cast_unchecked<int64>(li * 4i32), 0i32);
                         li = li + 1i32;
                         ri18 = ri18 + 1i32;
                     }
@@ -429,7 +429,7 @@ pub func:deflate_process_dynamic = int32(wild BitReader-> : reader,
     // Build distance tree from next hdist lengths (starting at offset hlit)
     HuffmanTree:dist_tree = HuffmanTree{counts: 0i64, symbols: 0i64, max_len: 0i32, num_syms: 0i32};
     drop huffmantree_init(@dist_tree, dist_counts, dist_syms, HUFFMAN_MAX_BITS);
-    int64:dist_offset = @cast_unchecked<int64>(hlit * 4i32);
+    int64:dist_offset = cast_unchecked<int64>(hlit * 4i32);
     int32:dr = raw huffmantree_build_from_lengths(@dist_tree, all_lens + dist_offset, hdist);
     if (dr != ERR_OK) {
         nitpick_libc_mem_free(cl_lens); nitpick_libc_mem_free(cl_counts);

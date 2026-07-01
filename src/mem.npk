@@ -19,12 +19,12 @@ extern "nitpick_libc_mem" {
 // load8: reads one byte from absolute address `addr`.
 pub func:load8 = int8(int64:addr) {
     int32:val = nitpick_libc_mem_read_byte(addr, 0i64);
-    pass @cast_unchecked<int8>(val & 255i32);
+    pass cast_unchecked<int8>(val & 255i32);
 };
 
 // store8: writes one byte to absolute address `addr`.
 pub func:store8 = int8(int64:addr, int8:val) {
-    nitpick_libc_mem_write_byte(addr, 0i64, @cast_unchecked<int32>(val) & 255i32);
+    nitpick_libc_mem_write_byte(addr, 0i64, cast_unchecked<int32>(val) & 255i32);
     pass 0i8;
 };
 
